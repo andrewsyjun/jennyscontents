@@ -1,0 +1,10 @@
+{
+  "name": "jennyscontents",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Jenny's Contents content strategy dashboard and social data access helpers.",
+  "type": "module",
+  "scripts": {
+    "check:access": "node scripts/check-access.mjs"
+  }
+}
