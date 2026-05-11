@@ -1,0 +1,378 @@
+:root {
+  color-scheme: light;
+  --bg: #f6f4ef;
+  --ink: #1c2420;
+  --muted: #66706b;
+  --line: #d9d4c8;
+  --panel: #fffdf8;
+  --panel-strong: #f0eee6;
+  --primary: #245746;
+  --primary-dark: #17392e;
+  --accent: #a8432d;
+  --accent-soft: #f1d7cf;
+  --blue: #2f5f8d;
+  --blue-soft: #dce8f2;
+  --shadow: 0 14px 36px rgb(31 37 35 / 10%);
+  --radius: 8px;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px clamp(16px, 4vw, 42px);
+  border-bottom: 1px solid var(--line);
+  background: rgb(246 244 239 / 92%);
+  backdrop-filter: blur(14px);
+}
+
+.app-header h1,
+.section-heading h2,
+.account-title h3,
+.preview-header h3 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.app-header h1 {
+  font-size: clamp(1.35rem, 2.5vw, 2rem);
+  line-height: 1.05;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.header-actions,
+.link-row,
+.preview-header,
+.section-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.header-actions,
+.section-heading {
+  justify-content: space-between;
+}
+
+.workspace {
+  display: grid;
+  gap: 18px;
+  padding: 18px clamp(16px, 4vw, 42px) 42px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: clamp(16px, 2.5vw, 24px);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  outline: none;
+}
+
+input,
+select {
+  min-height: 42px;
+  padding: 9px 11px;
+}
+
+textarea {
+  min-height: 116px;
+  resize: vertical;
+  padding: 11px;
+  line-height: 1.45;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgb(47 95 141 / 14%);
+}
+
+.button {
+  min-height: 40px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 9px 13px;
+  cursor: pointer;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.button.primary {
+  background: var(--primary);
+  color: white;
+}
+
+.button.primary:hover {
+  background: var(--primary-dark);
+}
+
+.button.secondary,
+.button.compact {
+  border-color: var(--line);
+  background: var(--panel-strong);
+  color: var(--ink);
+}
+
+.button.ghost {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--ink);
+}
+
+.button.compact {
+  min-height: 32px;
+  padding: 7px 10px;
+  font-size: 0.8rem;
+}
+
+.pillars {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.pillars label,
+.task-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.pillars input,
+.task-list input {
+  width: 17px;
+  height: 17px;
+  min-height: 0;
+  accent-color: var(--primary);
+}
+
+.save-state,
+.progress {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.account-grid,
+.idea-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.account-card,
+.idea-card,
+.brief-preview {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: 15px;
+}
+
+.account-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.account-title h3 {
+  font-size: 1.1rem;
+}
+
+.platform-label {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.status-select {
+  width: min(100%, 132px);
+  min-height: 34px;
+  padding: 6px 8px;
+  font-size: 0.78rem;
+}
+
+.link-row {
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+
+.external-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 9px;
+  color: var(--primary);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.external-link:hover {
+  border-color: var(--primary);
+}
+
+.task-list {
+  display: grid;
+  gap: 9px;
+  margin-top: 10px;
+}
+
+.strategy-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.75fr) minmax(320px, 1.25fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.analytics-inputs {
+  display: grid;
+  gap: 14px;
+}
+
+.brief-preview {
+  display: grid;
+  min-height: 360px;
+  background: #111a16;
+  color: #eef5ee;
+}
+
+.brief-preview .preview-header {
+  align-self: start;
+  justify-content: space-between;
+}
+
+.brief-preview h3 {
+  font-size: 1rem;
+}
+
+pre {
+  overflow: auto;
+  white-space: pre-wrap;
+  margin: 12px 0 0;
+  color: #dce9de;
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+.idea-card {
+  display: grid;
+  gap: 12px;
+}
+
+.idea-card textarea {
+  min-height: 78px;
+}
+
+@media (max-width: 1040px) {
+  .form-grid,
+  .account-grid,
+  .idea-grid,
+  .strategy-layout {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .strategy-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .app-header,
+  .section-heading,
+  .account-title {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .header-actions {
+    width: 100%;
+  }
+
+  .header-actions .button {
+    flex: 1;
+  }
+
+  .form-grid,
+  .account-grid,
+  .idea-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .button {
+    min-width: 0;
+  }
+}

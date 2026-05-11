@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Jenny's Contents</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">Jenny's Contents</p>
+        <h1>Daily content command center</h1>
+      </div>
+      <div class="header-actions">
+        <button class="button ghost" id="resetDemo" type="button">Reset</button>
+        <button class="button primary" id="copyStrategy" type="button">Copy brief</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="panel brand-panel" aria-labelledby="brand-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Setup</p>
+            <h2 id="brand-heading">Brand foundation</h2>
+          </div>
+          <output class="save-state" id="saveState">Saved locally</output>
+        </div>
+
+        <div class="form-grid">
+          <label>
+            Display name
+            <input data-store="displayName" value="Jenny Jun Homes" />
+          </label>
+          <label>
+            Market
+            <input data-store="market" value="Chicago suburbs" />
+          </label>
+          <label>
+            Audience
+            <input data-store="audience" value="buyers, sellers, and relocating families" />
+          </label>
+          <label>
+            Primary CTA
+            <input data-store="primaryCta" value="DM me 'HOME' for the local guide" />
+          </label>
+        </div>
+
+        <div class="pillars" aria-label="Content pillars">
+          <label>
+            <input type="checkbox" data-store="pillarMarket" checked />
+            Market updates
+          </label>
+          <label>
+            <input type="checkbox" data-store="pillarBuyer" checked />
+            Buyer education
+          </label>
+          <label>
+            <input type="checkbox" data-store="pillarSeller" checked />
+            Seller strategy
+          </label>
+          <label>
+            <input type="checkbox" data-store="pillarLocal" checked />
+            Local lifestyle
+          </label>
+        </div>
+      </section>
+
+      <section class="panel account-panel" aria-labelledby="accounts-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Accounts</p>
+            <h2 id="accounts-heading">Launch checklist</h2>
+          </div>
+          <span class="progress" id="setupProgress">0%</span>
+        </div>
+
+        <div class="account-grid" id="accountGrid"></div>
+      </section>
+
+      <section class="panel strategy-panel" aria-labelledby="strategy-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Morning run</p>
+            <h2 id="strategy-heading">Content strategy prompt</h2>
+          </div>
+          <button class="button secondary" id="downloadBrief" type="button">Download .md</button>
+        </div>
+
+        <div class="strategy-layout">
+          <div class="analytics-inputs">
+            <label>
+              Today's filming focus
+              <select data-store="focus">
+                <option>3 reels I can film in under 45 minutes</option>
+                <option>1 carousel, 1 talking-head reel, 1 b-roll reel</option>
+                <option>seller-focused ideas only</option>
+                <option>buyer-focused ideas only</option>
+              </select>
+            </label>
+            <label>
+              Paste 30-day analytics
+              <textarea data-store="analytics" placeholder="Paste reach, saves, shares, comments, follower growth, post links, and notes here."></textarea>
+            </label>
+          </div>
+
+          <article class="brief-preview">
+            <div class="preview-header">
+              <h3>Generated brief</h3>
+              <button class="button compact" id="copyPrompt" type="button">Copy prompt</button>
+            </div>
+            <pre id="promptPreview"></pre>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel ideas-panel" aria-labelledby="ideas-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Today</p>
+            <h2 id="ideas-heading">Three filming ideas</h2>
+          </div>
+          <button class="button secondary" id="seedIdeas" type="button">Load starter ideas</button>
+        </div>
+
+        <div class="idea-grid" id="ideaGrid"></div>
+      </section>
+    </main>
+
+    <template id="accountCardTemplate">
+      <article class="account-card">
+        <div class="account-title">
+          <div>
+            <p class="platform-label"></p>
+            <h3></h3>
+          </div>
+          <select class="status-select" aria-label="Account status">
+            <option>Not started</option>
+            <option>In progress</option>
+            <option>Live</option>
+          </select>
+        </div>
+        <label>
+          Handle
+          <input class="handle-input" />
+        </label>
+        <div class="link-row"></div>
+        <div class="task-list"></div>
+      </article>
+    </template>
+
+    <template id="ideaTemplate">
+      <article class="idea-card">
+        <label>
+          Hook
+          <textarea class="idea-hook"></textarea>
+        </label>
+        <label>
+          Format
+          <textarea class="idea-format"></textarea>
+        </label>
+        <label>
+          Caption draft
+          <textarea class="idea-caption"></textarea>
+        </label>
+        <label>
+          CTA
+          <textarea class="idea-cta"></textarea>
+        </label>
+      </article>
+    </template>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>
