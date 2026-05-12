@@ -32,13 +32,13 @@ The app links to the public signup and business/analytics pages for each platfor
 
 Recommended handle pattern:
 
-- X: `@JennyJunHomes`
-- Instagram: `@jennyjunhomes`
-- TikTok: `@jennyjunhomes`
+- X: `@JunResidential`
+- Instagram: `@junresidentialgroup`
+- TikTok: `@junresidential`
 
 Recommended bio starter:
 
-> Helping buyers, sellers, and relocating families make confident moves in the Chicago suburbs. DM HOME for the local guide.
+> Helping buyers, sellers, and relocating families make confident moves in North Dallas and across DFW. DM DFW for the local guide.
 
 ## API and automation roadmap
 

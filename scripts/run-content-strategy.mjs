@@ -25,7 +25,7 @@ if (options.help) {
 const runDate = options.date ? parseDate(options.date) : new Date();
 const runDateKey = formatDateKey(runDate);
 const graphVersion = process.env.META_GRAPH_VERSION || "v25.0";
-const market = process.env.CONTENT_MARKET || "Chicago suburbs";
+const market = process.env.CONTENT_MARKET || "North Dallas and DFW";
 const warnings = [];
 const sourceStatus = [];
 

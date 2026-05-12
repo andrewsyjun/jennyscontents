@@ -67,9 +67,14 @@ For Instagram:
 Recommended starter hashtag set:
 
 ```text
-chicagorealestate
-chicagorealtor
-chicagosuburbs
+dfwrealestate
+dallasrealestate
+northdallas
+dallasrealtor
+dfwrealtor
+planotx
+friscotx
+mckinneytx
 realtor
 realestateagent
 homebuyer

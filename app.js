@@ -5,7 +5,7 @@ const platforms = [
     id: "x",
     label: "X",
     name: "X",
-    handle: "@JennyJunHomes",
+    handle: "@JunResidential",
     links: [
       ["Sign up", "https://x.com/i/flow/signup"],
       ["Profile settings", "https://x.com/settings/profile"],
@@ -25,7 +25,7 @@ const platforms = [
     id: "instagram",
     label: "Instagram",
     name: "Instagram",
-    handle: "@jennyjunhomes",
+    handle: "@junresidentialgroup",
     links: [
       ["Sign up", "https://www.instagram.com/accounts/emailsignup/"],
       ["Professional setup", "https://www.instagram.com/accounts/convert_to_professional_account/"],
@@ -45,7 +45,7 @@ const platforms = [
     id: "tiktok",
     label: "TikTok",
     name: "TikTok",
-    handle: "@jennyjunhomes",
+    handle: "@junresidential",
     links: [
       ["Sign up", "https://www.tiktok.com/signup"],
       ["Business suite", "https://www.tiktok.com/business-suite"],
@@ -65,36 +65,52 @@ const platforms = [
 
 const starterIdeas = [
   {
-    hook: "The first question I ask every Chicago suburbs buyer in 2026",
-    format: "Talking-head opener, three quick bullets on screen, then one local example from a recent search.",
+    hook: "The first question I ask every North Dallas buyer before we tour",
+    format: "Talking-head opener, three quick bullets on screen, then one local example from a North Dallas search.",
     caption:
-      "Most buyers start with bedrooms and price. I start with lifestyle fit, commute, and resale risk. That order saves time and prevents expensive compromises.",
-    cta: "DM me 'HOME' and I will send you the buyer prep checklist.",
+      "Most buyers start with bedrooms and price. I start with lifestyle fit, commute, school and work routes, and resale risk. That order saves time and prevents expensive compromises.",
+    cta: "DM me 'DFW' and I will send you the North Dallas buyer prep checklist.",
   },
   {
-    hook: "A seller mistake that quietly costs showings in the first 72 hours",
-    format: "B-roll of a listing prep walkthrough with text overlays for pricing, photos, and launch timing.",
+    hook: "A North Dallas seller mistake that quietly costs showings in the first 72 hours",
+    format: "B-roll of a listing prep walkthrough with text overlays for pricing, photos, prep, and launch timing.",
     caption:
       "The first three days shape the market's opinion of your home. Clean prep, clear pricing, and a coordinated launch matter more than one big open house.",
-    cta: "Message me 'SELL' for the pre-listing timeline.",
+    cta: "Message me 'SELL' for the North Dallas pre-listing timeline.",
   },
   {
-    hook: "What your budget actually buys in the Chicago suburbs right now",
+    hook: "What your budget actually buys in North Dallas right now",
     format: "Carousel or reel with three price bands, each with a neighborhood-style expectation and tradeoff.",
     caption:
-      "A realistic budget conversation is not about discouraging you. It is how we find the best fit faster and avoid chasing homes that do not match your goals.",
+      "A realistic budget conversation is not about discouraging you. It is how we find the best fit faster across North Dallas and DFW and avoid chasing homes that do not match your goals.",
     cta: "Send me your target area and I will map the current options.",
   },
 ];
+
+const legacyDefaults = {
+  displayName: "Jenny Jun Homes",
+  market: "Chicago suburbs",
+  primaryCta: "DM me 'HOME' for the local guide",
+  accountHandles: {
+    x: "@JennyJunHomes",
+    instagram: "@jennyjunhomes",
+    tiktok: "@jennyjunhomes",
+  },
+  ideaHooks: [
+    "The first question I ask every Chicago suburbs buyer in 2026",
+    "A seller mistake that quietly costs showings in the first 72 hours",
+    "What your budget actually buys in the Chicago suburbs right now",
+  ],
+};
 
 let state = loadState();
 
 function loadState() {
   const defaults = {
-    displayName: "Jenny Jun Homes",
-    market: "Chicago suburbs",
+    displayName: "Jun Residential Group",
+    market: "North Dallas and DFW",
     audience: "buyers, sellers, and relocating families",
-    primaryCta: "DM me 'HOME' for the local guide",
+    primaryCta: "DM me 'DFW' for the North Dallas guide",
     focus: "3 reels I can film in under 45 minutes",
     analytics: "",
     pillarMarket: true,
@@ -106,10 +122,41 @@ function loadState() {
   };
 
   try {
-    return { ...defaults, ...JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") };
+    return migrateState(JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"), defaults);
   } catch {
     return defaults;
   }
+}
+
+function migrateState(saved, defaults) {
+  const next = { ...defaults, ...saved };
+
+  if (!saved.displayName || saved.displayName === legacyDefaults.displayName) {
+    next.displayName = defaults.displayName;
+  }
+
+  if (!saved.market || saved.market === legacyDefaults.market) {
+    next.market = defaults.market;
+  }
+
+  if (!saved.primaryCta || saved.primaryCta === legacyDefaults.primaryCta) {
+    next.primaryCta = defaults.primaryCta;
+  }
+
+  next.accounts = { ...(saved.accounts || {}) };
+  platforms.forEach((platform) => {
+    const account = { ...(next.accounts[platform.id] || {}) };
+    if (account.handle === legacyDefaults.accountHandles[platform.id]) {
+      account.handle = platform.handle;
+      next.accounts[platform.id] = account;
+    }
+  });
+
+  if (!Array.isArray(saved.ideas) || saved.ideas.some((idea) => legacyDefaults.ideaHooks.includes(idea.hook))) {
+    next.ideas = structuredClone(starterIdeas);
+  }
+
+  return next;
 }
 
 function persist() {
