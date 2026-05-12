@@ -75,6 +75,7 @@ textarea {
 .header-actions,
 .link-row,
 .preview-header,
+.section-actions,
 .section-heading {
   display: flex;
   align-items: center;
@@ -146,6 +147,9 @@ textarea:focus {
 }
 
 .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 40px;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -153,6 +157,7 @@ textarea:focus {
   cursor: pointer;
   font-weight: 800;
   line-height: 1;
+  text-decoration: none;
 }
 
 .button.primary {
@@ -482,11 +487,13 @@ pre {
     flex-direction: column;
   }
 
-  .header-actions {
+  .header-actions,
+  .section-actions {
     width: 100%;
   }
 
-  .header-actions .button {
+  .header-actions .button,
+  .section-actions .button {
     flex: 1;
   }
 

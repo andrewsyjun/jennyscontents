@@ -27,6 +27,32 @@ const server = http.createServer((request, response) => {
   try {
     const url = new URL(request.url || "/", `http://${host}:${port}`);
 
+    if (url.pathname === "/auth/facebook/start") {
+      handleFacebookStart(response);
+      return;
+    }
+
+    if (url.pathname === "/auth/facebook/callback") {
+      handleFacebookCallback(url)
+        .then((html) => send(response, 200, html, "text/html; charset=utf-8"))
+        .catch((error) =>
+          send(
+            response,
+            500,
+            authResultPage({
+              title: "Facebook Login failed",
+              status: error.message,
+              details: [
+                "No tokens were printed.",
+                "Check the local .env values and the Facebook Login redirect URI in Meta Developer settings.",
+              ],
+            }),
+            "text/html; charset=utf-8"
+          )
+        );
+      return;
+    }
+
     if (url.pathname === "/api/instagram/summary") {
       handleInstagramSummary(url)
         .then((payload) => sendJson(response, 200, payload))
@@ -56,8 +82,202 @@ const server = http.createServer((request, response) => {
 
 server.listen(port, host, () => {
   console.log(`Jenny's Contents local app: http://${host}:${port}/`);
+  console.log(`Facebook callback: http://${host}:${port}/auth/facebook/callback`);
   console.log(`TikTok callback: http://${host}:${port}/auth/tiktok/callback`);
 });
+
+function handleFacebookStart(response) {
+  const appId = process.env.META_APP_ID;
+  const redirectUri = facebookRedirectUri();
+
+  if (!appId) {
+    send(
+      response,
+      500,
+      authResultPage({
+        title: "Facebook Login is not configured",
+        status: "Add META_APP_ID and META_APP_SECRET to .env, then restart npm start.",
+        details: [
+          `Use this redirect URI in Meta: ${redirectUri}`,
+          "Do not paste the app secret into chat.",
+        ],
+      }),
+      "text/html; charset=utf-8"
+    );
+    return;
+  }
+
+  const authUrl = new URL(`https://www.facebook.com/${graphVersion}/dialog/oauth`);
+  authUrl.searchParams.set("client_id", appId);
+  authUrl.searchParams.set("redirect_uri", redirectUri);
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("state", "jennyscontents-facebook-login");
+  authUrl.searchParams.set("scope", facebookLoginScopes().join(","));
+
+  response.writeHead(302, { Location: authUrl.toString() });
+  response.end();
+}
+
+async function handleFacebookCallback(url) {
+  const error = url.searchParams.get("error") || url.searchParams.get("error_description");
+  if (error) {
+    throw new Error(error);
+  }
+
+  const state = url.searchParams.get("state");
+  if (state !== "jennyscontents-facebook-login") {
+    throw new Error("Invalid OAuth state.");
+  }
+
+  const code = url.searchParams.get("code");
+  if (!code) {
+    throw new Error("No code parameter was returned.");
+  }
+
+  if (!process.env.META_APP_ID || !process.env.META_APP_SECRET) {
+    throw new Error("META_APP_ID and META_APP_SECRET must be set in .env before exchanging the code.");
+  }
+
+  const shortToken = await exchangeFacebookCode(code);
+  const { token, tokenType } = await exchangeLongLivedFacebookToken(shortToken);
+  const discovery = await discoverInstagramAccount(token);
+
+  if (!discovery.instagramUserId) {
+    throw new Error("No connected Instagram business account was found for the authorized Facebook Pages.");
+  }
+
+  upsertEnvValues(envPath(), {
+    INSTAGRAM_AUTH_MODE: "facebook_login",
+    INSTAGRAM_ACCESS_TOKEN: token,
+    INSTAGRAM_USER_ID: discovery.instagramUserId,
+    INSTAGRAM_USERNAME: discovery.instagramUsername,
+    INSTAGRAM_PAGE_ID: discovery.pageId,
+    INSTAGRAM_HASHTAG_DISCOVERY: "true",
+  });
+
+  Object.assign(process.env, {
+    INSTAGRAM_AUTH_MODE: "facebook_login",
+    INSTAGRAM_ACCESS_TOKEN: token,
+    INSTAGRAM_USER_ID: discovery.instagramUserId,
+    INSTAGRAM_USERNAME: discovery.instagramUsername,
+    INSTAGRAM_PAGE_ID: discovery.pageId,
+    INSTAGRAM_HASHTAG_DISCOVERY: "true",
+  });
+
+  return authResultPage({
+    title: "Facebook Login connected",
+    status: `Connected @${discovery.instagramUsername || discovery.instagramUserId} through ${discovery.pageName || "the selected Facebook Page"}.`,
+    details: [
+      `Token type saved: ${tokenType}.`,
+      "INSTAGRAM_AUTH_MODE is now facebook_login.",
+      "INSTAGRAM_HASHTAG_DISCOVERY is now true.",
+      "No token values were printed.",
+    ],
+  });
+}
+
+async function exchangeFacebookCode(code) {
+  const tokenUrl = new URL(`https://graph.facebook.com/${graphVersion}/oauth/access_token`);
+  tokenUrl.searchParams.set("client_id", process.env.META_APP_ID);
+  tokenUrl.searchParams.set("redirect_uri", facebookRedirectUri());
+  tokenUrl.searchParams.set("client_secret", process.env.META_APP_SECRET);
+  tokenUrl.searchParams.set("code", code);
+
+  const payload = await getJson(tokenUrl, {}, "Facebook OAuth code exchange");
+  if (!payload.access_token) {
+    throw new Error("Facebook OAuth code exchange did not return an access token.");
+  }
+  return payload.access_token;
+}
+
+async function exchangeLongLivedFacebookToken(shortToken) {
+  const tokenUrl = new URL(`https://graph.facebook.com/${graphVersion}/oauth/access_token`);
+  tokenUrl.searchParams.set("grant_type", "fb_exchange_token");
+  tokenUrl.searchParams.set("client_id", process.env.META_APP_ID);
+  tokenUrl.searchParams.set("client_secret", process.env.META_APP_SECRET);
+  tokenUrl.searchParams.set("fb_exchange_token", shortToken);
+
+  try {
+    const payload = await getJson(tokenUrl, {}, "Facebook long-lived token exchange");
+    return {
+      token: payload.access_token || shortToken,
+      tokenType: payload.access_token ? "long-lived user token" : "short-lived user token",
+    };
+  } catch {
+    return { token: shortToken, tokenType: "short-lived user token" };
+  }
+}
+
+async function discoverInstagramAccount(token) {
+  const accountsUrl = new URL(`https://graph.facebook.com/${graphVersion}/me/accounts`);
+  accountsUrl.searchParams.set("fields", "id,name,instagram_business_account{id,username}");
+  accountsUrl.searchParams.set("limit", "100");
+  accountsUrl.searchParams.set("access_token", token);
+
+  const payload = await getJson(accountsUrl, {}, "Facebook Pages");
+  const pages = Array.isArray(payload.data) ? payload.data : [];
+  const preferredPageId = process.env.INSTAGRAM_PAGE_ID || "";
+  const preferredUsername = String(process.env.INSTAGRAM_USERNAME || "").toLowerCase();
+
+  const selected =
+    pages.find((page) => preferredPageId && page.id === preferredPageId) ||
+    pages.find(
+      (page) =>
+        preferredUsername &&
+        String(page.instagram_business_account?.username || "").toLowerCase() === preferredUsername
+    ) ||
+    pages.find((page) => page.instagram_business_account?.id);
+
+  return {
+    pageId: selected?.id || "",
+    pageName: selected?.name || "",
+    instagramUserId: selected?.instagram_business_account?.id || "",
+    instagramUsername: selected?.instagram_business_account?.username || preferredUsername,
+  };
+}
+
+function facebookRedirectUri() {
+  return (
+    process.env.FACEBOOK_REDIRECT_URI ||
+    `${process.env.LOCAL_APP_URL || `http://${host}:${port}`}/auth/facebook/callback`
+  );
+}
+
+function facebookLoginScopes() {
+  return csv(
+    process.env.FACEBOOK_LOGIN_SCOPES ||
+      "instagram_basic,pages_show_list,pages_read_engagement,business_management,instagram_manage_insights"
+  );
+}
+
+function authResultPage({ title, status, details }) {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(title)}</title>
+    <style>
+      body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f4ef; color: #1c2420; }
+      main { max-width: 760px; margin: 10vh auto; padding: 28px; background: #fffdf8; border: 1px solid #d9d4c8; border-radius: 8px; }
+      h1 { margin: 0 0 12px; font-size: 1.6rem; }
+      p, li { line-height: 1.55; }
+      a { color: #245746; font-weight: 800; }
+      code { background: #f0eee6; padding: 2px 5px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>${escapeHtml(title)}</h1>
+      <p>${escapeHtml(status)}</p>
+      <ul>
+        ${details.map((detail) => `<li>${escapeHtml(detail)}</li>`).join("")}
+      </ul>
+      <p><a href="/">Return to Jenny's Contents</a></p>
+    </main>
+  </body>
+</html>`;
+}
 
 async function handleInstagramSummary(url) {
   const token = process.env.INSTAGRAM_ACCESS_TOKEN;
@@ -110,12 +330,12 @@ async function handleInstagramSummary(url) {
   const media = [];
   for (const item of items) {
     const insights = await getInstagramInsights({ graphHost, mediaId: item.id, token, warnings });
-    media.push(normalizeInstagramMedia({ item, insights }));
+    media.push(normalizeInstagramMedia({ item, insights, source: "owned_media" }));
   }
 
   if (truthy(process.env.INSTAGRAM_HASHTAG_DISCOVERY)) {
     if (authMode === "facebook_login") {
-      sourceStatus.push("Instagram hashtag discovery is enabled for the strategy runner.");
+      media.push(...(await collectInstagramHashtags({ token, userId: me.id, sourceStatus, warnings })));
     } else {
       sourceStatus.push("Instagram hashtag discovery requires INSTAGRAM_AUTH_MODE=facebook_login.");
     }
@@ -133,6 +353,62 @@ async function handleInstagramSummary(url) {
     media,
     analysis: analyzeMedia(media),
   };
+}
+
+async function collectInstagramHashtags({ token, userId, sourceStatus, warnings }) {
+  const tags = csv(process.env.INSTAGRAM_HASHTAGS).slice(0, 30);
+  const limit = numberFromEnv("INSTAGRAM_HASHTAG_LIMIT", 5, 1, 25);
+  const rows = [];
+
+  if (!tags.length) {
+    sourceStatus.push("Instagram hashtag discovery skipped: INSTAGRAM_HASHTAGS is empty.");
+    return rows;
+  }
+
+  for (const tag of tags) {
+    try {
+      const cleanTag = tag.replace(/^#/, "");
+      const searchUrl = new URL(`https://graph.facebook.com/${graphVersion}/ig_hashtag_search`);
+      searchUrl.searchParams.set("user_id", userId);
+      searchUrl.searchParams.set("q", cleanTag);
+      searchUrl.searchParams.set("access_token", token);
+
+      const search = await getJson(searchUrl, {}, `Instagram hashtag ${cleanTag}`);
+      const hashtagId = search.data?.[0]?.id;
+      if (!hashtagId) {
+        sourceStatus.push(`Instagram #${cleanTag}: no hashtag id returned.`);
+        continue;
+      }
+
+      const topUrl = new URL(`https://graph.facebook.com/${graphVersion}/${hashtagId}/top_media`);
+      topUrl.searchParams.set("user_id", userId);
+      topUrl.searchParams.set(
+        "fields",
+        "id,caption,media_type,media_product_type,permalink,timestamp,like_count,comments_count"
+      );
+      topUrl.searchParams.set("limit", String(limit));
+      topUrl.searchParams.set("access_token", token);
+
+      const top = await getJson(topUrl, {}, `Instagram hashtag top_media ${cleanTag}`);
+      const items = Array.isArray(top.data) ? top.data : [];
+      sourceStatus.push(`Instagram #${cleanTag}: ${items.length} top media item(s).`);
+
+      for (const item of items) {
+        rows.push(
+          normalizeInstagramMedia({
+            item,
+            insights: {},
+            source: "hashtag_top_media",
+            hashtag: cleanTag,
+          })
+        );
+      }
+    } catch (error) {
+      warnings.push(`Instagram hashtag #${tag} failed: ${error.message}`);
+    }
+  }
+
+  return rows;
 }
 
 async function getInstagramInsights({ graphHost, mediaId, token, warnings }) {
@@ -159,10 +435,12 @@ async function getInstagramInsights({ graphHost, mediaId, token, warnings }) {
   return insights;
 }
 
-function normalizeInstagramMedia({ item, insights }) {
+function normalizeInstagramMedia({ item, insights, source, hashtag = "" }) {
   const caption = String(item.caption || "");
   const media = {
     id: item.id,
+    source,
+    hashtag,
     caption,
     format: instagramFormat(item),
     mediaType: item.media_type || "",
@@ -296,6 +574,50 @@ function loadEnv(file) {
       process.env[key] = value;
     }
   }
+}
+
+function envPath() {
+  return path.join(root, ".env");
+}
+
+function upsertEnvValues(file, values) {
+  const lines = fs.existsSync(file) ? fs.readFileSync(file, "utf8").split(/\r?\n/) : [];
+  const seen = new Set();
+  const updated = lines.map((line) => {
+    const eq = line.indexOf("=");
+    if (eq === -1 || line.trim().startsWith("#")) return line;
+
+    const key = line.slice(0, eq).trim();
+    if (!Object.hasOwn(values, key)) return line;
+
+    seen.add(key);
+    return `${key}=${quoteEnvValue(values[key])}`;
+  });
+
+  for (const [key, value] of Object.entries(values)) {
+    if (!seen.has(key)) {
+      updated.push(`${key}=${quoteEnvValue(value)}`);
+    }
+  }
+
+  fs.writeFileSync(file, `${updated.join("\n").replace(/\n*$/, "")}\n`);
+}
+
+function quoteEnvValue(value) {
+  const text = String(value || "");
+  if (!text || /[\s#'"]/.test(text)) {
+    return JSON.stringify(text);
+  }
+  return text;
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function instagramAuthMode() {

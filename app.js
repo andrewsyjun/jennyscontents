@@ -394,7 +394,14 @@ function mediaPostCell(item) {
 
   const meta = document.createElement("span");
   meta.className = "media-meta";
-  meta.textContent = `${formatDate(item.timestamp)} · ${item.hookPattern} · ${item.topicCategory}`;
+  meta.textContent = [
+    formatDate(item.timestamp),
+    sourceLabel(item),
+    item.hookPattern,
+    item.topicCategory,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   cell.append(link, meta);
   return cell;
@@ -404,6 +411,12 @@ function postTitle(item) {
   const caption = String(item.caption || "").trim().replace(/\s+/g, " ");
   if (caption) return caption.length > 84 ? `${caption.slice(0, 81)}...` : caption;
   return item.permalink ? "Open Instagram post" : "Instagram post";
+}
+
+function sourceLabel(item) {
+  if (item.source === "hashtag_top_media") return item.hashtag ? `#${item.hashtag}` : "hashtag";
+  if (item.source === "owned_media") return "owned";
+  return item.source || "";
 }
 
 function textCell(value) {

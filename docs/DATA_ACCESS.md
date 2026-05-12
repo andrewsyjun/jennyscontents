@@ -199,6 +199,7 @@ For Facebook Login, request at least:
 ```text
 instagram_basic
 pages_show_list
+pages_read_engagement
 ```
 
 Then add the Instagram permissions needed by the workflow:
@@ -211,12 +212,24 @@ instagram_manage_comments
 Save Facebook Login tokens with:
 
 ```text
+META_APP_ID=
+META_APP_SECRET=
+FACEBOOK_REDIRECT_URI=http://localhost:4173/auth/facebook/callback
 INSTAGRAM_AUTH_MODE=facebook_login
 INSTAGRAM_ACCESS_TOKEN=
 INSTAGRAM_USER_ID=
 INSTAGRAM_USERNAME=
 INSTAGRAM_PAGE_ID=
+INSTAGRAM_HASHTAG_DISCOVERY=true
 ```
+
+The local app can perform the Facebook Login exchange for you after the app id and secret are saved locally:
+
+```bash
+npm start
+```
+
+Then open <http://127.0.0.1:4173/> and click **Connect Facebook Login**. Meta enforces HTTPS for Facebook Login except for its local-development localhost exception, so use `http://localhost:4173/auth/facebook/callback` for this callback. The callback exchanges the code, discovers the connected Facebook Page and Instagram business account, and updates `.env` without printing access tokens.
 
 To discover the connected Instagram user id from a Page id:
 
@@ -227,9 +240,9 @@ GET https://graph.facebook.com/{version}/{page-id}?fields=instagram_business_acc
 For owned content analysis, pull media and insights from:
 
 ```text
-GET https://graph.instagram.com/{version}/{ig-user-id}/media
-GET https://graph.instagram.com/{version}/{ig-media-id}/insights
-GET https://graph.instagram.com/{version}/{ig-user-id}/insights
+GET https://graph.facebook.com/{version}/{ig-user-id}/media
+GET https://graph.facebook.com/{version}/{ig-media-id}/insights
+GET https://graph.facebook.com/{version}/{ig-user-id}/insights
 ```
 
 For limited public hashtag discovery, use the Instagram API with Facebook Login path:

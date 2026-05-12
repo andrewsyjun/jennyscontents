@@ -68,6 +68,8 @@ http://127.0.0.1:4173/api/instagram/summary
 
 The browser uses this endpoint to show connected-account status, recent media metrics, hook patterns, topic categories, and source warnings without exposing Instagram tokens to client-side JavaScript.
 
+For Instagram Hashtag Search, configure `META_APP_ID`, `META_APP_SECRET`, and `FACEBOOK_REDIRECT_URI` in `.env`, add that redirect URI to Facebook Login for Business settings in Meta, then use the app's `Connect Facebook Login` button. Use `http://localhost:4173/auth/facebook/callback` for Facebook Login because Meta enforces HTTPS except for its local-development localhost exception. The callback updates `.env` for the Facebook Login path without printing token values.
+
 To automate the full prompt, add a backend and connect:
 
 - X API for public post search and account analytics.
