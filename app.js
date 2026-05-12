@@ -1,6 +1,7 @@
 const STORAGE_KEY = "jennyscontents.v1";
 const REVIEW_TOKEN_KEY = "jennyscontents.facebookReviewToken";
 const META_APP_ID = "859442203159885";
+const FACEBOOK_LOGIN_CONFIG_ID = "2173649920103461";
 const GRAPH_VERSION = "v25.0";
 const GITHUB_PAGES_BASE = "/jennyscontents";
 const REVIEW_HASHTAGS = [
@@ -148,6 +149,7 @@ function facebookReviewLoginUrl() {
   const authUrl = new URL(`https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth`);
   authUrl.searchParams.set("client_id", META_APP_ID);
   authUrl.searchParams.set("redirect_uri", reviewRedirectUri());
+  authUrl.searchParams.set("config_id", FACEBOOK_LOGIN_CONFIG_ID);
   authUrl.searchParams.set("response_type", "token");
   authUrl.searchParams.set("scope", REVIEW_SCOPES.join(","));
   authUrl.searchParams.set("state", "jennyscontents-github-review");
