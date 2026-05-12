@@ -238,7 +238,9 @@ The local app can perform the Facebook Login exchange for you after the app id a
 npm start
 ```
 
-Then open <http://127.0.0.1:4173/> and click **Connect Facebook Login**. Meta enforces HTTPS for Facebook Login except for its local-development localhost exception, so use `http://localhost:4173/auth/facebook/callback` for this callback. The callback exchanges the code, discovers the connected Facebook Page and Instagram business account, and updates `.env` without printing access tokens.
+Then open <http://127.0.0.1:4173/> and click **Connect Facebook Login**. Meta enforces HTTPS for Facebook Login except for its local-development localhost exception, so use `http://localhost:4173/auth/facebook/callback` for this callback. The callback exchanges the code, discovers the Instagram business account through the connected Facebook Page or business portfolio, and updates `.env` without printing access tokens.
+
+If Meta's Page connection UI stalls but the Facebook Login dialog lets you select `@junresidentialgroup`, keep `INSTAGRAM_USER_ID` and `INSTAGRAM_USERNAME` in `.env`. The local callback will validate that configured Instagram account with the Facebook Login token and can still enable hashtag discovery when Graph grants access.
 
 To discover the connected Instagram user id from a Page id:
 

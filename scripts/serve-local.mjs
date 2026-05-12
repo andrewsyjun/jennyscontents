@@ -141,12 +141,19 @@ async function handleFacebookCallback(url) {
   const shortToken = await exchangeFacebookCode(code);
   const { token, tokenType } = await exchangeLongLivedFacebookToken(shortToken);
   const discovery = await discoverInstagramAccount(token);
+  if (!discovery.instagramUserId) {
+    Object.assign(discovery, await discoverBusinessInstagramAccount(token));
+  }
+  if (!discovery.instagramUserId && process.env.INSTAGRAM_USER_ID) {
+    Object.assign(discovery, await validateConfiguredInstagramAccount(token));
+  }
 
   if (!discovery.instagramUserId) {
     throw new AuthError(
       "No connected Instagram business account was found for the authorized Facebook Pages.",
       [
         "No token values were saved or printed.",
+        "If the OAuth dialog showed @junresidentialgroup, add INSTAGRAM_USER_ID and INSTAGRAM_USERNAME to .env and try again.",
         "Open Meta Business Suite Settings -> Profiles -> Jun Residential Group.",
         "Click Connect Instagram and finish linking @junresidentialgroup to the Jun Residential Group Facebook Page.",
         "Then return to Jenny's Contents and click Connect Facebook Login again.",
@@ -241,6 +248,73 @@ async function discoverInstagramAccount(token) {
     pageName: selected?.name || "",
     instagramUserId: selected?.instagram_business_account?.id || "",
     instagramUsername: selected?.instagram_business_account?.username || preferredUsername,
+  };
+}
+
+async function discoverBusinessInstagramAccount(token) {
+  const businessesUrl = new URL(`https://graph.facebook.com/${graphVersion}/me/businesses`);
+  businessesUrl.searchParams.set("fields", "id,name");
+  businessesUrl.searchParams.set("limit", "100");
+  businessesUrl.searchParams.set("access_token", token);
+
+  try {
+    const payload = await getJson(businessesUrl, {}, "Facebook businesses");
+    const businesses = Array.isArray(payload.data) ? payload.data : [];
+    const preferredUsername = String(process.env.INSTAGRAM_USERNAME || "").toLowerCase();
+
+    for (const business of businesses) {
+      const accountsUrl = new URL(
+        `https://graph.facebook.com/${graphVersion}/${business.id}/instagram_business_accounts`
+      );
+      accountsUrl.searchParams.set("fields", "id,username");
+      accountsUrl.searchParams.set("limit", "100");
+      accountsUrl.searchParams.set("access_token", token);
+
+      const accountsPayload = await getJson(accountsUrl, {}, `Business Instagram accounts ${business.name}`);
+      const accounts = Array.isArray(accountsPayload.data) ? accountsPayload.data : [];
+      const selected =
+        accounts.find(
+          (account) => preferredUsername && String(account.username || "").toLowerCase() === preferredUsername
+        ) || accounts[0];
+
+      if (selected?.id) {
+        return {
+          pageId: process.env.INSTAGRAM_PAGE_ID || "",
+          pageName: business.name || "",
+          instagramUserId: selected.id,
+          instagramUsername: selected.username || preferredUsername,
+        };
+      }
+    }
+  } catch {
+    return {
+      pageId: "",
+      pageName: "",
+      instagramUserId: "",
+      instagramUsername: "",
+    };
+  }
+
+  return {
+    pageId: "",
+    pageName: "",
+    instagramUserId: "",
+    instagramUsername: "",
+  };
+}
+
+async function validateConfiguredInstagramAccount(token) {
+  const userId = process.env.INSTAGRAM_USER_ID;
+  const profileUrl = new URL(`https://graph.facebook.com/${graphVersion}/${userId}`);
+  profileUrl.searchParams.set("fields", "id,username");
+  profileUrl.searchParams.set("access_token", token);
+
+  const profile = await getJson(profileUrl, {}, "Configured Instagram account");
+  return {
+    pageId: process.env.INSTAGRAM_PAGE_ID || "",
+    pageName: "",
+    instagramUserId: profile.id || userId,
+    instagramUsername: profile.username || process.env.INSTAGRAM_USERNAME || "",
   };
 }
 
