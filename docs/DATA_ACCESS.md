@@ -242,6 +242,22 @@ Then open <http://127.0.0.1:4173/> and click **Connect Facebook Login**. Meta en
 
 If Meta's Page connection UI stalls but the Facebook Login dialog lets you select `@junresidentialgroup`, keep `INSTAGRAM_USER_ID` and `INSTAGRAM_USERNAME` in `.env`. The local callback will validate that configured Instagram account with the Facebook Login token and can still enable hashtag discovery when Graph grants access.
 
+For Meta App Review, GitHub Pages can be enabled temporarily so reviewers can load the app externally:
+
+```text
+https://andrewsyjun.github.io/jennyscontents/
+```
+
+Add this review callback URL in Facebook Login for Business settings when using the GitHub Pages build:
+
+```text
+https://andrewsyjun.github.io/jennyscontents/auth/facebook/callback/
+```
+
+The GitHub Pages build is public and does not contain `META_APP_SECRET`. It uses a short-lived browser
+OAuth token stored in session storage only, then calls Graph API directly for review testing. Keep
+the `.env` long-lived-token flow local.
+
 To discover the connected Instagram user id from a Page id:
 
 ```text

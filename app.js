@@ -1,4 +1,24 @@
 const STORAGE_KEY = "jennyscontents.v1";
+const REVIEW_TOKEN_KEY = "jennyscontents.facebookReviewToken";
+const META_APP_ID = "859442203159885";
+const GRAPH_VERSION = "v25.0";
+const GITHUB_PAGES_BASE = "/jennyscontents";
+const REVIEW_HASHTAGS = [
+  "dfwrealestate",
+  "dallasrealestate",
+  "northdallas",
+  "dallasrealtor",
+  "dfwrealtor",
+  "planotx",
+  "friscotx",
+  "mckinneytx",
+];
+const REVIEW_SCOPES = [
+  "instagram_basic",
+  "pages_show_list",
+  "pages_read_engagement",
+  "business_management",
+];
 
 const platforms = [
   {
@@ -104,6 +124,35 @@ const legacyDefaults = {
 };
 
 let state = loadState();
+
+function isStaticReviewMode() {
+  return (
+    window.location.hostname.endsWith("github.io") ||
+    new URLSearchParams(window.location.search).get("review") === "github"
+  );
+}
+
+function appBasePath() {
+  return window.location.pathname.startsWith(GITHUB_PAGES_BASE) ? GITHUB_PAGES_BASE : "";
+}
+
+function githubReviewUrl() {
+  return `${window.location.origin}${GITHUB_PAGES_BASE}/`;
+}
+
+function reviewRedirectUri() {
+  return `${window.location.origin}${appBasePath()}/auth/facebook/callback/`;
+}
+
+function facebookReviewLoginUrl() {
+  const authUrl = new URL(`https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth`);
+  authUrl.searchParams.set("client_id", META_APP_ID);
+  authUrl.searchParams.set("redirect_uri", reviewRedirectUri());
+  authUrl.searchParams.set("response_type", "token");
+  authUrl.searchParams.set("scope", REVIEW_SCOPES.join(","));
+  authUrl.searchParams.set("state", "jennyscontents-github-review");
+  return authUrl.toString();
+}
 
 function loadState() {
   const defaults = {
@@ -272,6 +321,11 @@ async function loadInstagramData() {
   button.disabled = true;
 
   try {
+    if (isStaticReviewMode()) {
+      renderInstagramData(await loadGithubReviewInstagramData());
+      return;
+    }
+
     const response = await fetch("/api/instagram/summary?limit=12", { cache: "no-store" });
     const payload = await response.json();
     if (!response.ok || !payload.ok) {
@@ -311,7 +365,7 @@ function renderInstagramData(payload) {
 }
 
 function instagramStatusText(payload) {
-  if (payload.configured === false) return "Instagram token is not configured.";
+  if (payload.configured === false) return payload.message || "Instagram token is not configured.";
   if (!payload.ok) return payload.message || "Instagram data could not be loaded.";
   const checked = payload.checkedAt ? `Last checked ${formatDateTime(payload.checkedAt)}.` : "";
   if (!payload.media?.length) {
@@ -331,6 +385,214 @@ function renderInstagramError(message) {
   renderCountList("#instagramFormats", []);
   renderInstagramRows([]);
   renderSourceStatus([], []);
+}
+
+async function loadGithubReviewInstagramData() {
+  const token = sessionStorage.getItem(REVIEW_TOKEN_KEY);
+  const sourceStatus = [
+    `GitHub Pages review mode: ${githubReviewUrl()}`,
+    "This public build uses a short-lived browser OAuth token only for Meta review testing.",
+  ];
+
+  if (!token) {
+    return {
+      ok: false,
+      configured: false,
+      message: "GitHub Pages review mode is ready. Click Connect Facebook Login to authorize a short-lived review session.",
+      checkedAt: new Date().toISOString(),
+      account: null,
+      media: [],
+      analysis: buildInstagramAnalysis([]),
+      sourceStatus,
+      warnings: [
+        `Meta review callback URL: ${reviewRedirectUri()}`,
+        "No app secret or long-lived token is stored in the public GitHub Pages build.",
+      ],
+    };
+  }
+
+  const warnings = [];
+  let account = null;
+  const media = [];
+
+  try {
+    const connectedAccount = await discoverReviewInstagramAccount(token);
+    account = {
+      id: connectedAccount.id,
+      username: connectedAccount.username,
+      authMode: "github_review",
+    };
+    sourceStatus.push(`Connected @${connectedAccount.username} through ${connectedAccount.pageName}.`);
+
+    const owned = await graphGet(`${connectedAccount.id}/media`, token, {
+      fields: "id,caption,media_type,media_product_type,timestamp,permalink,like_count,comments_count",
+      limit: "12",
+    });
+
+    (owned.data || []).forEach((item) => {
+      media.push(normalizeReviewMedia(item, "owned_media"));
+    });
+    sourceStatus.push(`Instagram owned media: ${(owned.data || []).length} item(s) returned.`);
+
+    for (const hashtag of REVIEW_HASHTAGS.slice(0, 5)) {
+      try {
+        const search = await graphGet("ig_hashtag_search", token, {
+          user_id: connectedAccount.id,
+          q: hashtag,
+        });
+        const hashtagId = search.data?.[0]?.id;
+        if (!hashtagId) {
+          sourceStatus.push(`Instagram #${hashtag}: no hashtag id returned.`);
+          continue;
+        }
+
+        const topMedia = await graphGet(`${hashtagId}/top_media`, token, {
+          user_id: connectedAccount.id,
+          fields: "id,caption,media_type,media_product_type,timestamp,permalink,like_count,comments_count",
+          limit: "8",
+        });
+
+        (topMedia.data || []).forEach((item) => {
+          media.push(normalizeReviewMedia(item, "hashtag_top_media", hashtag));
+        });
+        sourceStatus.push(`Instagram #${hashtag}: ${(topMedia.data || []).length} top media item(s) returned.`);
+      } catch (error) {
+        warnings.push(`Instagram hashtag #${hashtag} failed: ${error.message}`);
+      }
+    }
+  } catch (error) {
+    warnings.push(error.message);
+  }
+
+  return {
+    ok: Boolean(account),
+    configured: true,
+    checkedAt: new Date().toISOString(),
+    account,
+    media,
+    analysis: buildInstagramAnalysis(media),
+    sourceStatus,
+    warnings,
+    message: account ? "" : "Could not load the connected Instagram account for this review session.",
+  };
+}
+
+async function discoverReviewInstagramAccount(token) {
+  const accounts = await graphGet("me/accounts", token, {
+    fields: "id,name,instagram_business_account{id,username}",
+    limit: "20",
+  });
+  const page = (accounts.data || []).find((item) => item.instagram_business_account?.id);
+
+  if (!page) {
+    throw new Error("No Facebook Page with a connected Instagram Business account was returned for this login.");
+  }
+
+  return {
+    id: page.instagram_business_account.id,
+    username: page.instagram_business_account.username,
+    pageId: page.id,
+    pageName: page.name,
+  };
+}
+
+async function graphGet(path, token, params = {}) {
+  const url = new URL(`https://graph.facebook.com/${GRAPH_VERSION}/${path}`);
+  Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
+  url.searchParams.set("access_token", token);
+
+  const response = await fetch(url.toString(), { cache: "no-store" });
+  const payload = await response.json();
+  if (!response.ok || payload.error) {
+    const error = payload.error;
+    throw new Error(error?.message || `Graph API request failed for ${path}`);
+  }
+  return payload;
+}
+
+function normalizeReviewMedia(item, source, hashtag = "") {
+  const caption = String(item.caption || "");
+  const views = Number(item.video_views || 0);
+  const likes = Number(item.like_count || 0);
+  const comments = Number(item.comments_count || 0);
+  return {
+    id: item.id,
+    source,
+    hashtag,
+    caption,
+    permalink: item.permalink || "",
+    timestamp: item.timestamp || "",
+    format: classifyFormat(item),
+    views,
+    likes,
+    comments,
+    saves: 0,
+    shares: 0,
+    score: views + likes * 3 + comments * 8,
+    hookPattern: classifyHook(caption),
+    topicCategory: classifyTopic(caption),
+  };
+}
+
+function classifyFormat(item) {
+  const product = String(item.media_product_type || "").toLowerCase();
+  const type = String(item.media_type || "").toLowerCase();
+  if (product === "reels") return "reel";
+  if (type === "carousel_album") return "carousel";
+  if (type === "video") return "video";
+  if (type === "image") return "post";
+  return type || product || "post";
+}
+
+function classifyHook(caption) {
+  const text = caption.toLowerCase();
+  if (/\b(before|first|avoid|mistake|stop)\b/.test(text)) return "warning or mistake";
+  if (/\b(why|what|how|where|when)\b/.test(text)) return "question led";
+  if (/\b(3|three|top|best|worst|things|tips)\b/.test(text)) return "list based";
+  if (/\b(price|budget|cost|afford|payment)\b/.test(text)) return "money led";
+  return "direct local insight";
+}
+
+function classifyTopic(caption) {
+  const text = caption.toLowerCase();
+  if (/\b(sell|seller|listing|staging|showing)\b/.test(text)) return "seller strategy";
+  if (/\b(buy|buyer|offer|mortgage|loan|budget|afford)\b/.test(text)) return "buyer education";
+  if (/\b(dallas|dfw|frisco|plano|mckinney|north dallas|neighborhood)\b/.test(text)) return "local market";
+  if (/\b(home|house|property|real estate|realtor)\b/.test(text)) return "real estate basics";
+  return "local lifestyle";
+}
+
+function buildInstagramAnalysis(media) {
+  const sorted = media.slice().sort((a, b) => b.score - a.score);
+  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const recent = sorted.filter((item) => {
+    const time = new Date(item.timestamp).valueOf();
+    return Number.isFinite(time) && time >= cutoff;
+  });
+  const strategySet = recent.length ? recent : sorted;
+  return {
+    recentCount: recent.length,
+    totals: strategySet.reduce(
+      (totals, item) => ({
+        views: totals.views + Number(item.views || 0),
+        likes: totals.likes + Number(item.likes || 0),
+        comments: totals.comments + Number(item.comments || 0),
+        saves: totals.saves + Number(item.saves || 0),
+        shares: totals.shares + Number(item.shares || 0),
+      }),
+      { views: 0, likes: 0, comments: 0, saves: 0, shares: 0 }
+    ),
+    topPosts: strategySet.slice(0, 5),
+    hookPatterns: topCounts(strategySet.map((item) => item.hookPattern)),
+    topicCategories: topCounts(strategySet.map((item) => item.topicCategory)),
+    formatMix: topCounts(strategySet.map((item) => item.format)),
+  };
+}
+
+function topCounts(values) {
+  const counts = new Map();
+  values.filter(Boolean).forEach((value) => counts.set(value, (counts.get(value) || 0) + 1));
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 5);
 }
 
 function renderCountList(selector, rows) {
@@ -612,10 +874,27 @@ function attachActions() {
   });
 }
 
+function setupReviewMode() {
+  const connect = document.querySelector("#facebookConnect");
+  if (!connect) return;
+
+  if (isStaticReviewMode()) {
+    connect.href = facebookReviewLoginUrl();
+    connect.textContent = sessionStorage.getItem(REVIEW_TOKEN_KEY)
+      ? "Reconnect Facebook Login"
+      : "Connect Facebook Login";
+    connect.title = "GitHub Pages review mode uses a short-lived browser token and stores it only in session storage.";
+    return;
+  }
+
+  connect.href = "/auth/facebook/start";
+}
+
 setupStoredInputs();
 renderAccounts();
 renderPrompt();
 renderIdeas();
+setupReviewMode();
 attachActions();
 loadInstagramData();
 persist();

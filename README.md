@@ -12,8 +12,8 @@ Jenny's Contents is a small static app for launching and operating a daily real 
 
 ## Run locally
 
-The app is intended to run locally, not as a public website.
-Keep GitHub Pages disabled for this repository unless you intentionally want to publish it again.
+The private operating mode is local. This mode can exchange OAuth codes with platform app secrets
+stored in `.env`.
 
 ```bash
 cd /Users/andrewjun/work/home/jennyscontents
@@ -69,6 +69,26 @@ http://127.0.0.1:4173/api/instagram/summary
 The browser uses this endpoint to show connected-account status, recent media metrics, hook patterns, topic categories, and source warnings without exposing Instagram tokens to client-side JavaScript.
 
 For Instagram Hashtag Search, configure `META_APP_ID`, `META_APP_SECRET`, and `FACEBOOK_REDIRECT_URI` in `.env`, add that redirect URI to Facebook Login for Business settings in Meta, then use the app's `Connect Facebook Login` button. Use `http://localhost:4173/auth/facebook/callback` for Facebook Login because Meta enforces HTTPS except for its local-development localhost exception. The callback updates `.env` for the Facebook Login path without printing token values.
+
+## GitHub Pages review build
+
+GitHub Pages can be enabled temporarily for Meta App Review:
+
+```text
+https://andrewsyjun.github.io/jennyscontents/
+```
+
+Use this public callback URL in Meta's Facebook Login for Business settings:
+
+```text
+https://andrewsyjun.github.io/jennyscontents/auth/facebook/callback/
+```
+
+The GitHub Pages build is review-only. It does not contain an app secret and cannot create a
+long-lived token. Instead, it uses Facebook Login's browser redirect to store a short-lived token in
+the reviewer's browser session storage, then calls Graph API directly from the page. This keeps the
+public site testable for Meta without publishing private credentials. Use the local server for normal
+operation.
 
 To automate the full prompt, add a backend and connect:
 
