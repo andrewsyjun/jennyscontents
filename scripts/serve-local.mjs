@@ -42,7 +42,7 @@ const server = http.createServer((request, response) => {
             authResultPage({
               title: "Facebook Login failed",
               status: error.message,
-              details: [
+              details: error.details || [
                 "No tokens were printed.",
                 "Check the local .env values and the Facebook Login redirect URI in Meta Developer settings.",
               ],
@@ -143,7 +143,15 @@ async function handleFacebookCallback(url) {
   const discovery = await discoverInstagramAccount(token);
 
   if (!discovery.instagramUserId) {
-    throw new Error("No connected Instagram business account was found for the authorized Facebook Pages.");
+    throw new AuthError(
+      "No connected Instagram business account was found for the authorized Facebook Pages.",
+      [
+        "No token values were saved or printed.",
+        "Open Meta Business Suite Settings -> Profiles -> Jun Residential Group.",
+        "Click Connect Instagram and finish linking @junresidentialgroup to the Jun Residential Group Facebook Page.",
+        "Then return to Jenny's Contents and click Connect Facebook Login again.",
+      ]
+    );
   }
 
   upsertEnvValues(envPath(), {
@@ -236,6 +244,14 @@ async function discoverInstagramAccount(token) {
   };
 }
 
+class AuthError extends Error {
+  constructor(message, details) {
+    super(message);
+    this.name = "AuthError";
+    this.details = details;
+  }
+}
+
 function facebookRedirectUri() {
   return (
     process.env.FACEBOOK_REDIRECT_URI ||
@@ -246,7 +262,7 @@ function facebookRedirectUri() {
 function facebookLoginScopes() {
   return csv(
     process.env.FACEBOOK_LOGIN_SCOPES ||
-      "instagram_basic,pages_show_list,pages_read_engagement,business_management,instagram_manage_insights"
+      "instagram_basic,pages_show_list,pages_read_engagement,business_management"
   );
 }
 

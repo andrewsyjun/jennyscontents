@@ -194,6 +194,14 @@ Facebook Login requirements:
 - The Instagram account must be connected to a Facebook Page.
 - The Facebook account completing OAuth must have a Page task such as manage, create content, moderate, or advertise on the connected Page.
 
+To connect the Page before OAuth:
+
+1. Open Meta Business Suite.
+2. Go to Settings -> Profiles.
+3. Select the `Jun Residential Group` Facebook Page.
+4. Under Connect Assets, click Connect Instagram.
+5. Log into `@junresidentialgroup` and finish linking it to the Page.
+
 For Facebook Login, request at least:
 
 ```text
@@ -202,12 +210,13 @@ pages_show_list
 pages_read_engagement
 ```
 
-Then add the Instagram permissions needed by the workflow:
+For local hashtag discovery, set the helper scopes to:
 
 ```text
-instagram_manage_insights
-instagram_manage_comments
+FACEBOOK_LOGIN_SCOPES=instagram_basic,pages_show_list,pages_read_engagement,business_management
 ```
+
+Meta may require additional permissions for publishing, messaging, or advanced insights, but do not add scopes that the OAuth dialog rejects.
 
 Save Facebook Login tokens with:
 
