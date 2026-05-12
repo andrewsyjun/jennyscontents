@@ -60,6 +60,14 @@ npm run strategy:daily
 
 The runner saves a local Markdown report and can upload it to Google Drive when Drive credentials are configured. See [`docs/CONTENT_STRATEGY_RUNNER.md`](./docs/CONTENT_STRATEGY_RUNNER.md).
 
+The local app also exposes a private Instagram summary endpoint at:
+
+```text
+http://127.0.0.1:4173/api/instagram/summary
+```
+
+The browser uses this endpoint to show connected-account status, recent media metrics, hook patterns, topic categories, and source warnings without exposing Instagram tokens to client-side JavaScript.
+
 To automate the full prompt, add a backend and connect:
 
 - X API for public post search and account analytics.

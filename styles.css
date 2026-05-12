@@ -230,6 +230,7 @@ textarea:focus {
 
 .account-card,
 .idea-card,
+.signal-card,
 .brief-preview {
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -291,6 +292,127 @@ textarea:focus {
   margin-top: 10px;
 }
 
+.data-status {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-strong);
+  padding: 11px 12px;
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.metric-grid,
+.signal-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.metric-grid article {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: 13px;
+}
+
+.metric-grid span,
+.media-meta {
+  display: block;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.metric-grid strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 1.15rem;
+}
+
+.signal-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.signal-card h3 {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+}
+
+.signal-card ul {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink);
+  font-size: 0.88rem;
+}
+
+.media-table-wrap {
+  overflow-x: auto;
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.media-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 860px;
+  font-size: 0.84rem;
+}
+
+.media-table th,
+.media-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 11px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.media-table th {
+  background: var(--panel-strong);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.media-table td:not(:first-child) {
+  white-space: nowrap;
+}
+
+.media-table a {
+  color: var(--primary);
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.media-table a:hover {
+  text-decoration: underline;
+}
+
+.media-meta {
+  margin-top: 5px;
+  line-height: 1.35;
+}
+
+.source-status {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.source-status p {
+  margin: 0;
+}
+
 .strategy-layout {
   display: grid;
   grid-template-columns: minmax(260px, 0.75fr) minmax(320px, 1.25fr);
@@ -341,6 +463,8 @@ pre {
   .form-grid,
   .account-grid,
   .idea-grid,
+  .metric-grid,
+  .signal-grid,
   .strategy-layout {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -368,7 +492,9 @@ pre {
 
   .form-grid,
   .account-grid,
-  .idea-grid {
+  .idea-grid,
+  .metric-grid,
+  .signal-grid {
     grid-template-columns: 1fr;
   }
 

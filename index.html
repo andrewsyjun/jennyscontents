@@ -79,6 +79,72 @@
         <div class="account-grid" id="accountGrid"></div>
       </section>
 
+      <section class="panel data-panel" aria-labelledby="instagram-data-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Signals</p>
+            <h2 id="instagram-data-heading">Instagram data</h2>
+          </div>
+          <button class="button secondary" id="refreshInstagram" type="button">Refresh Instagram</button>
+        </div>
+
+        <div class="data-status" id="instagramStatus">Waiting for refresh</div>
+
+        <div class="metric-grid" id="instagramMetrics">
+          <article>
+            <span>Account</span>
+            <strong id="instagramAccount">Not loaded</strong>
+          </article>
+          <article>
+            <span>Recent posts</span>
+            <strong id="instagramRecentCount">0</strong>
+          </article>
+          <article>
+            <span>Total reach/views</span>
+            <strong id="instagramViews">0</strong>
+          </article>
+          <article>
+            <span>Saves + shares</span>
+            <strong id="instagramSavesShares">0</strong>
+          </article>
+        </div>
+
+        <div class="signal-grid">
+          <article class="signal-card">
+            <h3>Hook patterns</h3>
+            <ul id="instagramHookPatterns"></ul>
+          </article>
+          <article class="signal-card">
+            <h3>Topic categories</h3>
+            <ul id="instagramTopics"></ul>
+          </article>
+          <article class="signal-card">
+            <h3>Format mix</h3>
+            <ul id="instagramFormats"></ul>
+          </article>
+        </div>
+
+        <div class="media-table-wrap">
+          <table class="media-table">
+            <thead>
+              <tr>
+                <th>Post</th>
+                <th>Format</th>
+                <th>Score</th>
+                <th>Views</th>
+                <th>Likes</th>
+                <th>Comments</th>
+                <th>Saves</th>
+                <th>Shares</th>
+              </tr>
+            </thead>
+            <tbody id="instagramMediaRows"></tbody>
+          </table>
+        </div>
+
+        <div class="source-status" id="instagramSourceStatus"></div>
+      </section>
+
       <section class="panel strategy-panel" aria-labelledby="strategy-heading">
         <div class="section-heading">
           <div>

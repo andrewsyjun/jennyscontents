@@ -264,6 +264,193 @@ function renderProgress() {
   document.querySelector("#setupProgress").textContent = `${Math.round((done / total) * 100)}%`;
 }
 
+async function loadInstagramData() {
+  const status = document.querySelector("#instagramStatus");
+  const button = document.querySelector("#refreshInstagram");
+
+  status.textContent = "Refreshing Instagram data...";
+  button.disabled = true;
+
+  try {
+    const response = await fetch("/api/instagram/summary?limit=12", { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) {
+      renderInstagramData(payload);
+      return;
+    }
+
+    renderInstagramData(payload);
+  } catch (error) {
+    renderInstagramError(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function renderInstagramData(payload) {
+  const account = payload.account;
+  const analysis = payload.analysis || {};
+  const totals = analysis.totals || {};
+  const media = payload.media || [];
+
+  document.querySelector("#instagramStatus").textContent = instagramStatusText(payload);
+  document.querySelector("#instagramAccount").textContent = account
+    ? `@${account.username || account.id} (${account.authMode.replace("_", " ")})`
+    : "Not connected";
+  document.querySelector("#instagramRecentCount").textContent = formatNumber(analysis.recentCount || 0);
+  document.querySelector("#instagramViews").textContent = formatNumber(totals.views || 0);
+  document.querySelector("#instagramSavesShares").textContent = formatNumber(
+    (totals.saves || 0) + (totals.shares || 0)
+  );
+
+  renderCountList("#instagramHookPatterns", analysis.hookPatterns || []);
+  renderCountList("#instagramTopics", analysis.topicCategories || []);
+  renderCountList("#instagramFormats", analysis.formatMix || []);
+  renderInstagramRows(media);
+  renderSourceStatus(payload.sourceStatus || [], payload.warnings || []);
+}
+
+function instagramStatusText(payload) {
+  if (payload.configured === false) return "Instagram token is not configured.";
+  if (!payload.ok) return payload.message || "Instagram data could not be loaded.";
+  const checked = payload.checkedAt ? `Last checked ${formatDateTime(payload.checkedAt)}.` : "";
+  if (!payload.media?.length) {
+    return `Connected, but no Instagram media was returned. ${checked}`;
+  }
+  return `Connected and loaded ${payload.media.length} Instagram media item(s). ${checked}`;
+}
+
+function renderInstagramError(message) {
+  document.querySelector("#instagramStatus").textContent = `Instagram data failed: ${message}`;
+  document.querySelector("#instagramAccount").textContent = "Not loaded";
+  document.querySelector("#instagramRecentCount").textContent = "0";
+  document.querySelector("#instagramViews").textContent = "0";
+  document.querySelector("#instagramSavesShares").textContent = "0";
+  renderCountList("#instagramHookPatterns", []);
+  renderCountList("#instagramTopics", []);
+  renderCountList("#instagramFormats", []);
+  renderInstagramRows([]);
+  renderSourceStatus([], []);
+}
+
+function renderCountList(selector, rows) {
+  const list = document.querySelector(selector);
+  list.innerHTML = "";
+
+  if (!rows.length) {
+    const item = document.createElement("li");
+    item.textContent = "No ranked data yet";
+    list.append(item);
+    return;
+  }
+
+  rows.forEach(([label, count]) => {
+    const item = document.createElement("li");
+    item.textContent = `${label}: ${count}`;
+    list.append(item);
+  });
+}
+
+function renderInstagramRows(media) {
+  const body = document.querySelector("#instagramMediaRows");
+  body.innerHTML = "";
+
+  if (!media.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 8;
+    cell.textContent = "No Instagram media returned yet.";
+    row.append(cell);
+    body.append(row);
+    return;
+  }
+
+  media
+    .slice()
+    .sort((a, b) => b.score - a.score)
+    .forEach((item) => {
+      const row = document.createElement("tr");
+      row.append(
+        mediaPostCell(item),
+        textCell(item.format),
+        numberCell(item.score),
+        numberCell(item.views),
+        numberCell(item.likes),
+        numberCell(item.comments),
+        numberCell(item.saves),
+        numberCell(item.shares)
+      );
+      body.append(row);
+    });
+}
+
+function mediaPostCell(item) {
+  const cell = document.createElement("td");
+  const link = document.createElement("a");
+  link.href = item.permalink || "#";
+  link.target = "_blank";
+  link.rel = "noreferrer";
+  link.textContent = postTitle(item);
+
+  const meta = document.createElement("span");
+  meta.className = "media-meta";
+  meta.textContent = `${formatDate(item.timestamp)} · ${item.hookPattern} · ${item.topicCategory}`;
+
+  cell.append(link, meta);
+  return cell;
+}
+
+function postTitle(item) {
+  const caption = String(item.caption || "").trim().replace(/\s+/g, " ");
+  if (caption) return caption.length > 84 ? `${caption.slice(0, 81)}...` : caption;
+  return item.permalink ? "Open Instagram post" : "Instagram post";
+}
+
+function textCell(value) {
+  const cell = document.createElement("td");
+  cell.textContent = value || "-";
+  return cell;
+}
+
+function numberCell(value) {
+  const cell = document.createElement("td");
+  cell.textContent = formatNumber(value || 0);
+  return cell;
+}
+
+function renderSourceStatus(statusRows, warningRows) {
+  const container = document.querySelector("#instagramSourceStatus");
+  container.innerHTML = "";
+
+  [...statusRows, ...warningRows].forEach((line) => {
+    const item = document.createElement("p");
+    item.textContent = line;
+    container.append(item);
+  });
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat().format(Number(value || 0));
+}
+
+function formatDate(value) {
+  if (!value) return "No date";
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return "No date";
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function formatDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return "";
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function selectedPillars() {
   const labels = [];
   if (state.pillarMarket) labels.push("market updates");
@@ -395,6 +582,7 @@ function attachActions() {
   document.querySelector("#copyStrategy").addEventListener("click", () => copyText(briefMarkdown(), "Brief copied"));
   document.querySelector("#copyPrompt").addEventListener("click", () => copyText(buildPrompt(), "Prompt copied"));
   document.querySelector("#downloadBrief").addEventListener("click", downloadBrief);
+  document.querySelector("#refreshInstagram").addEventListener("click", loadInstagramData);
   document.querySelector("#seedIdeas").addEventListener("click", () => {
     state.ideas = structuredClone(starterIdeas);
     renderIdeas();
@@ -416,4 +604,5 @@ renderAccounts();
 renderPrompt();
 renderIdeas();
 attachActions();
+loadInstagramData();
 persist();
