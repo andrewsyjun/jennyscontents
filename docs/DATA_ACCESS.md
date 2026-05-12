@@ -250,12 +250,14 @@ Important notes:
 1. Go to TikTok for Developers: <https://developers.tiktok.com/>.
 2. Create an app named `jennyscontents`.
 3. Add Login Kit.
-4. Add Web as the platform.
+4. For local-only use, add Desktop as the platform.
 5. Use this redirect URI:
 
 ```text
-https://andrewsyjun.github.io/jennyscontents/auth/tiktok/callback
+http://127.0.0.1:4173/auth/tiktok/callback
 ```
+
+TikTok Web Login Kit redirect URIs must use HTTPS. TikTok Desktop Login Kit allows localhost or loopback HTTP redirect URIs with a port, so use Desktop mode for the local-only app.
 
 6. Add these minimum scopes:
 
@@ -274,15 +276,21 @@ user.info.stats
 7. Add the TikTok account under Sandbox settings -> Target Users before testing OAuth in sandbox.
 8. Save the sandbox client key, client secret, and redirect URI in `.env`.
 9. Complete OAuth with the TikTok account.
-10. If the GitHub Pages callback shows a 404 but the browser URL contains `code=`, OAuth succeeded. Use the full callback URL locally and do not paste it into chat.
-11. Exchange the callback code for tokens:
+10. Start the local app before testing OAuth:
 
 ```bash
-npm run tiktok:exchange -- 'https://andrewsyjun.github.io/jennyscontents/auth/tiktok/callback?code=...&state=jennyscontents'
+npm start
+```
+
+11. If the local callback page URL contains `code=`, OAuth succeeded. Use the full callback URL locally and do not paste it into chat.
+12. Exchange the callback code for tokens:
+
+```bash
+npm run tiktok:exchange -- 'http://127.0.0.1:4173/auth/tiktok/callback?code=...&state=jennyscontents'
 ```
 
 The exchange helper writes `TIKTOK_ACCESS_TOKEN`, `TIKTOK_REFRESH_TOKEN`, and `TIKTOK_OPEN_ID` to `.env` without printing token values.
-12. Save the handle without `@` as `TIKTOK_USERNAME` if you want validator output to show a stable handle.
+13. Save the handle without `@` as `TIKTOK_USERNAME` if you want validator output to show a stable handle.
 
 For owned content analysis, use:
 

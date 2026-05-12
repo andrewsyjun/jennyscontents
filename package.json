@@ -7,6 +7,7 @@
   "scripts": {
     "check:access": "node scripts/check-access.mjs",
     "drive:auth": "node scripts/google-drive-auth.mjs",
+    "start": "node scripts/serve-local.mjs",
     "strategy:daily": "node scripts/run-content-strategy.mjs",
     "tiktok:exchange": "node scripts/tiktok-exchange-code.mjs"
   }

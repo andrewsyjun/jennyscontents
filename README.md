@@ -12,9 +12,19 @@ Jenny's Contents is a small static app for launching and operating a daily real 
 
 ## Run locally
 
-Open `index.html` in a browser.
+The app is intended to run locally, not as a public website.
+Keep GitHub Pages disabled for this repository unless you intentionally want to publish it again.
 
-No install step is required.
+```bash
+cd /Users/andrewjun/work/home/jennyscontents
+npm start
+```
+
+Then open:
+
+```text
+http://127.0.0.1:4173/
+```
 
 ## Account setup notes
 
