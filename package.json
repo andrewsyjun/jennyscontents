@@ -5,6 +5,7 @@
   "description": "Jenny's Contents content strategy dashboard and social data access helpers.",
   "type": "module",
   "scripts": {
-    "check:access": "node scripts/check-access.mjs"
+    "check:access": "node scripts/check-access.mjs",
+    "tiktok:exchange": "node scripts/tiktok-exchange-code.mjs"
   }
 }

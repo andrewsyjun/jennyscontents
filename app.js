@@ -10,6 +10,7 @@ const platforms = [
       ["Sign up", "https://x.com/i/flow/signup"],
       ["Profile settings", "https://x.com/settings/profile"],
       ["Analytics", "https://analytics.x.com/"],
+      ["Developer console", "https://console.x.com/"],
     ],
     tasks: [
       "Claim the brand handle",
@@ -17,6 +18,7 @@ const platforms = [
       "Add bio, service area, and link-in-bio URL",
       "Enable two-factor authentication",
       "Pin the current buyer or seller CTA post",
+      "Create X API app and validate the Bearer token",
     ],
   },
   {
@@ -28,6 +30,7 @@ const platforms = [
       ["Sign up", "https://www.instagram.com/accounts/emailsignup/"],
       ["Professional setup", "https://www.instagram.com/accounts/convert_to_professional_account/"],
       ["Meta Business", "https://business.facebook.com/"],
+      ["Meta Developers", "https://developers.facebook.com/apps/"],
     ],
     tasks: [
       "Claim the matching handle",
@@ -35,6 +38,7 @@ const platforms = [
       "Choose real estate or entrepreneur category",
       "Connect the Facebook Page for Meta tools",
       "Turn on contact buttons and insights",
+      "Create Meta app and validate Instagram token",
     ],
   },
   {
@@ -46,6 +50,7 @@ const platforms = [
       ["Sign up", "https://www.tiktok.com/signup"],
       ["Business suite", "https://www.tiktok.com/business-suite"],
       ["Creator center", "https://www.tiktok.com/creator-center"],
+      ["Developer portal", "https://developers.tiktok.com/"],
     ],
     tasks: [
       "Claim the matching handle",
@@ -53,6 +58,7 @@ const platforms = [
       "Choose creator or business account mode",
       "Enable analytics after the account is live",
       "Post three starter videos before inviting traffic",
+      "Create TikTok developer app and validate Display API token",
     ],
   },
 ];
@@ -237,12 +243,17 @@ Content pillars: ${selectedPillars()}
 Primary CTA: ${state.primaryCta}
 Today's filming focus: ${state.focus}
 
-Search X, Instagram, and TikTok for the top performing real estate reels and carousels from the last 7 days.
+Use the available social data sources for the last 7 days:
+- X recent search for public real estate posts.
+- Instagram owned media insights and approved hashtag discovery results.
+- TikTok owned video analytics, approved Research API results, or manually collected public examples.
 
 Identify:
 1. Hook patterns getting saves and shares.
 2. Format structures that are repeatable for a local real estate agent.
 3. Topic categories resonating with buyers, sellers, and relocation audiences.
+
+Where saves and shares are unavailable for public examples, use the available proxy metrics and state the limitation.
 
 Review my own analytics from the last 30 days:
 ${state.analytics || "[Paste analytics here before running.]"}

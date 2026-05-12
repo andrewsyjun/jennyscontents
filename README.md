@@ -32,7 +32,17 @@ Recommended bio starter:
 
 ## API and automation roadmap
 
-The current version is intentionally dependency-free and does not scrape social platforms. To automate the full prompt, add a backend and connect:
+The current version is intentionally dependency-free and does not scrape social platforms. Data access setup lives in [`docs/DATA_ACCESS.md`](./docs/DATA_ACCESS.md), and credentials should only be stored in a local `.env`.
+
+To validate social API credentials locally:
+
+```bash
+cp .env.example .env
+npm run check:access
+npm run check:access -- --platform x
+```
+
+To automate the full prompt, add a backend and connect:
 
 - X API for public post search and account analytics.
 - Meta Instagram Graph API for Instagram insights.
