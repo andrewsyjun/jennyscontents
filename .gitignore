@@ -5,3 +5,6 @@ dist/
 .env.*
 !.env.example
 *.log
+content-strategy/
+data/analytics-notes.md
+data/manual-trends.json

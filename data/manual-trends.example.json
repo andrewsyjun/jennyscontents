@@ -1,0 +1,30 @@
+[
+  {
+    "platform": "instagram",
+    "source": "manual_research",
+    "url": "https://www.instagram.com/reel/example/",
+    "created_at": "2026-05-12T09:00:00-05:00",
+    "caption_or_text": "Example: 3 things buyers miss before making an offer",
+    "format": "reel",
+    "views": 120000,
+    "likes": 3200,
+    "comments": 180,
+    "shares": 420,
+    "saves": 610,
+    "hook_notes": "Numbered buyer mistake hook; fast checklist format"
+  },
+  {
+    "platform": "tiktok",
+    "source": "manual_research",
+    "url": "https://www.tiktok.com/@example/video/123",
+    "created_at": "2026-05-12T10:00:00-05:00",
+    "caption_or_text": "Example: I would not buy a house until checking this",
+    "format": "short_video",
+    "views": 85000,
+    "likes": 2400,
+    "comments": 130,
+    "shares": 350,
+    "saves": 0,
+    "hook_notes": "Contrarian warning hook; direct-to-camera plus property B-roll"
+  }
+]

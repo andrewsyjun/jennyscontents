@@ -42,6 +42,14 @@ npm run check:access
 npm run check:access -- --platform x
 ```
 
+To generate the morning content strategy report:
+
+```bash
+npm run strategy:daily
+```
+
+The runner saves a local Markdown report and can upload it to Google Drive when Drive credentials are configured. See [`docs/CONTENT_STRATEGY_RUNNER.md`](./docs/CONTENT_STRATEGY_RUNNER.md).
+
 To automate the full prompt, add a backend and connect:
 
 - X API for public post search and account analytics.
