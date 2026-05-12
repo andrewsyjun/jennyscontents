@@ -28,7 +28,6 @@ Instagram Public Content Access
 instagram_basic
 pages_show_list
 pages_read_engagement
-business_management
 ```
 
 The app uses Facebook Login to discover the Instagram Business account connected to the Facebook Page and then calls Instagram hashtag search endpoints. It does not request publishing or messaging permissions for this content strategy use case.

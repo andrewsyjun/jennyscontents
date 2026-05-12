@@ -213,7 +213,7 @@ pages_read_engagement
 For local hashtag discovery, set the helper scopes to:
 
 ```text
-FACEBOOK_LOGIN_SCOPES=instagram_basic,pages_show_list,pages_read_engagement,business_management
+FACEBOOK_LOGIN_SCOPES=instagram_basic,pages_show_list,pages_read_engagement
 ```
 
 Meta may require additional permissions for publishing, messaging, or advanced insights, but do not add scopes that the OAuth dialog rejects.
