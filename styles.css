@@ -1619,9 +1619,36 @@ textarea:focus {
   font-size: 0.88rem;
 }
 
+.media-table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.media-table-toolbar label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+
+.media-table-toolbar select {
+  min-width: 180px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 0.88rem;
+}
+
 .media-table-wrap {
   overflow-x: auto;
-  margin-top: 14px;
+  margin-top: 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #fff;
@@ -1861,6 +1888,15 @@ pre {
   .workflow-actions .button {
     flex: 1;
     min-width: 0;
+  }
+
+  .media-table-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .media-table-toolbar select {
+    width: 100%;
   }
 }
 

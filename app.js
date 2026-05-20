@@ -190,6 +190,7 @@ function loadState() {
     primaryCta: "DM me 'DFW' for the North Dallas guide",
     focus: "3 reels I can film in under 45 minutes",
     signalSource: "instagram",
+    mediaSort: "recommended",
     analytics: "",
     pillarMarket: true,
     pillarBuyer: true,
@@ -365,6 +366,7 @@ function renderInstagramData(payload) {
   renderCountList("#instagramHookPatterns", analysis.hookPatterns || []);
   renderCountList("#instagramTopics", analysis.topicCategories || []);
   renderCountList("#instagramFormats", analysis.formatMix || []);
+  renderPostSortControl();
   renderInstagramRows(media);
   renderSourceStatus(payload.sourceStatus || [], payload.warnings || []);
   updateExtractedIdeaFromPayload(payload);
@@ -1321,7 +1323,7 @@ function renderInstagramRows(media) {
 
   media
     .slice()
-    .sort(compareSignalMedia)
+    .sort(compareMediaForSelectedSort)
     .forEach((item) => {
       const row = document.createElement("tr");
       row.append(
@@ -1336,6 +1338,36 @@ function renderInstagramRows(media) {
       );
       body.append(row);
     });
+}
+
+function renderPostSortControl() {
+  const control = document.querySelector("#postSort");
+  if (!control) return;
+
+  if (!postSortOptions().includes(state.mediaSort)) {
+    state.mediaSort = "recommended";
+  }
+  control.value = state.mediaSort;
+}
+
+function postSortOptions() {
+  return ["recommended", "format", "score", "views", "likes", "comments", "saves", "shares"];
+}
+
+function compareMediaForSelectedSort(a, b) {
+  const sortKey = postSortOptions().includes(state.mediaSort) ? state.mediaSort : "recommended";
+  if (sortKey === "recommended") return compareSignalMedia(a, b);
+  if (sortKey === "format") {
+    return (
+      String(a.format || "").localeCompare(String(b.format || ""), undefined, { sensitivity: "base" }) ||
+      compareSignalMedia(a, b)
+    );
+  }
+  return compareNumericMedia(sortKey, a, b) || compareSignalMedia(a, b);
+}
+
+function compareNumericMedia(key, a, b) {
+  return Number(b?.[key] || 0) - Number(a?.[key] || 0);
 }
 
 function compareSignalMedia(a, b) {
@@ -4041,6 +4073,13 @@ function attachActions() {
   document.querySelector("#togglePrompt").addEventListener("click", togglePromptPanel);
   document.querySelector("#refreshInstagram").addEventListener("click", loadInstagramData);
   document.querySelector("#generateIdeas").addEventListener("click", generateIdeasFromSignals);
+  document.querySelector("#postSort").addEventListener("change", (event) => {
+    state.mediaSort = event.target.value;
+    if (latestInstagramPayload?.media) {
+      renderInstagramRows(latestInstagramPayload.media);
+    }
+    markDirty();
+  });
   document.querySelector("#saveBrief").addEventListener("click", saveBriefToDrive);
   document.querySelector("#useExtractedIdea").addEventListener("click", () => useIdeaInBrief(latestExtractedIdea?.idea));
   document.querySelector("#copyVideoPrompt").addEventListener("click", (event) => {
@@ -4108,6 +4147,7 @@ function attachActions() {
     renderFocusPlan();
     renderPrompt();
     renderIdeas();
+    renderPostSortControl();
     renderExtractedIdea(null);
     renderSavedIdeas();
     renderVideoManager();
@@ -4141,6 +4181,7 @@ async function bootApp() {
   renderFocusPlan();
   renderPrompt();
   renderIdeas();
+  renderPostSortControl();
   renderExtractedIdea(null);
   renderSavedIdeas();
   renderVideoManager();

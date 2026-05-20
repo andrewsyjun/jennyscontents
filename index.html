@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Jenny's Contents</title>
-    <link rel="stylesheet" href="./styles.css?v=20260520-external-video-upload" />
+    <link rel="stylesheet" href="./styles.css?v=20260520-post-sort" />
   </head>
   <body>
     <header class="app-header">
@@ -138,6 +138,20 @@
             <h3>Formats</h3>
             <ul id="instagramFormats"></ul>
           </article>
+        </div>
+
+        <div class="media-table-toolbar">
+          <label for="postSort">Sort posts by</label>
+          <select id="postSort">
+            <option value="recommended">Recent relevance</option>
+            <option value="format">Format</option>
+            <option value="score">Score</option>
+            <option value="views">Views</option>
+            <option value="likes">Likes</option>
+            <option value="comments">Comments</option>
+            <option value="saves">Saves</option>
+            <option value="shares">Shares</option>
+          </select>
         </div>
 
         <div class="media-table-wrap">
@@ -404,6 +418,6 @@
       </article>
     </template>
 
-    <script src="./app.js?v=20260520-external-video-upload" defer></script>
+    <script src="./app.js?v=20260520-post-sort" defer></script>
   </body>
 </html>
