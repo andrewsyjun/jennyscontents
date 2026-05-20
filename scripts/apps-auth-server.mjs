@@ -4,6 +4,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import nodemailer from "nodemailer";
+import QRCode from "qrcode";
 import {
   createPasswordResetToken,
   consumePasswordResetToken,
@@ -232,7 +233,7 @@ async function handleLoginPost(request, response, body) {
 
     const secret = generateTotpSecret();
     setMfaCookie(response, { username: user.username, next, setupSecret: secret });
-    renderTotpSetup(response, { username: user.username, next, secret });
+    await renderTotpSetup(response, { username: user.username, next, secret });
     return;
   }
 
@@ -278,7 +279,7 @@ async function handleMfaPost(request, response, params, mfaStage) {
     const error = `Too many verification attempts. Try again in ${Math.ceil(attempt.retryAfterMs / 1000)} seconds.`;
     if (state.setupSecret) {
       setMfaCookie(response, state);
-      renderTotpSetup(response, { username: user.username, next, secret: state.setupSecret, error });
+      await renderTotpSetup(response, { username: user.username, next, secret: state.setupSecret, error });
       return;
     }
 
@@ -293,7 +294,7 @@ async function handleMfaPost(request, response, params, mfaStage) {
     const error = "That authenticator code was not recognized.";
     if (state.setupSecret) {
       setMfaCookie(response, state);
-      renderTotpSetup(response, { username: user.username, next, secret: state.setupSecret, error });
+      await renderTotpSetup(response, { username: user.username, next, secret: state.setupSecret, error });
       return;
     }
 
@@ -404,9 +405,14 @@ function renderLogin(response, { username = "", next = "/", error = "", notice =
   );
 }
 
-function renderTotpSetup(response, { username = "", next = "/", secret = "", error = "" } = {}) {
+async function renderTotpSetup(response, { username = "", next = "/", secret = "", error = "" } = {}) {
   const message = error ? `<p class="form-message error">${escapeHtml(error)}</p>` : "";
   const setupUrl = otpauthUrl({ username, secret });
+  const qrCode = await QRCode.toDataURL(setupUrl, {
+    errorCorrectionLevel: "M",
+    margin: 1,
+    width: 220,
+  });
 
   send(
     response,
@@ -420,6 +426,7 @@ function renderTotpSetup(response, { username = "", next = "/", secret = "", err
           <p class="login-copy">Add this account to Google Authenticator, Microsoft Authenticator, 1Password, or another authenticator app, then enter the 6-digit code.</p>
           ${message}
           <div class="security-panel">
+            <img class="qr-code" src="${escapeHtml(qrCode)}" alt="Authenticator QR code" />
             <span class="security-label">Manual setup key</span>
             <code class="secret-code">${escapeHtml(formatTotpSecret(secret))}</code>
             <a class="setup-link" href="${escapeHtml(setupUrl)}">Open authenticator setup link</a>
@@ -853,6 +860,14 @@ function pageShell({ title, body }) {
         border-radius: 8px;
         padding: 14px;
         background: #f9f6ef;
+      }
+      .qr-code {
+        width: 180px;
+        height: 180px;
+        justify-self: center;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: white;
       }
       .security-label {
         color: var(--muted);
