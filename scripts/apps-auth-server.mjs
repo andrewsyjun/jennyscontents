@@ -3,17 +3,30 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  countAccounts,
+  createPoolFromEnv,
+  ensureAppsAuthSchema,
+  findAccountByUsername,
+  loadEnv,
+  normalizeUsername,
+  recordLoginEvent,
+  timingSafeEqual,
+  verifyPassword,
+} from "./apps-auth-db.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 loadEnv(path.join(root, ".env"));
+loadEnv(process.env.APPS_AUTH_ENV_FILE || "/etc/jenny-apps-auth/apps-auth.env");
 
 const host = process.env.APPS_AUTH_HOST || "127.0.0.1";
 const port = numberFromEnv("APPS_AUTH_PORT", 4180, 1024, 65535);
 const cookieName = process.env.APPS_AUTH_COOKIE_NAME || "jr_apps_session";
 const sessionSeconds = numberFromEnv("APPS_AUTH_SESSION_SECONDS", 12 * 60 * 60, 900, 30 * 24 * 60 * 60);
 const authSecret = process.env.APPS_AUTH_SECRET || "";
-const users = loadUsers();
+const databasePool = createPoolFromEnv();
+const fileUsers = databasePool ? [] : loadUsers();
 const apps = loadApps();
 const routeMap = loadRouteMap();
 const loginAttempts = new Map();
@@ -23,12 +36,24 @@ if (!authSecret || authSecret.length < 32) {
   process.exit(1);
 }
 
-if (!users.length) {
+if (!databasePool && !fileUsers.length) {
   console.error("No app users configured. Set APPS_AUTH_USERS_FILE or APPS_AUTH_USERS_JSON.");
   process.exit(1);
 }
 
+await bootstrapDatabase();
+
 const server = http.createServer((request, response) => {
+  routeRequest(request, response).catch((error) => {
+    send(response, 500, pageShell({ title: "App login error", body: `<h1>App login error</h1><p>${escapeHtml(error.message)}</p>` }));
+  });
+});
+
+server.listen(port, host, () => {
+  console.log(`Jenny Apps auth server: http://${host}:${port}/`);
+});
+
+async function routeRequest(request, response) {
   try {
     const url = new URL(request.url || "/", `http://${host}:${port}`);
 
@@ -38,19 +63,21 @@ const server = http.createServer((request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/auth/check") {
-      handleAuthCheck(request, response);
+      await handleAuthCheck(request, response);
       return;
     }
 
     if (request.method === "GET" && url.pathname === "/login") {
-      handleLoginGet(request, response, url);
+      await handleLoginGet(request, response, url);
       return;
     }
 
     if (request.method === "POST" && url.pathname === "/login") {
-      readBody(request)
-        .then((body) => handleLoginPost(request, response, body))
-        .catch((error) => renderLogin(response, { error: error.message, next: safeNextPath(url.searchParams.get("next")) }));
+      try {
+        await handleLoginPost(request, response, await readBody(request));
+      } catch (error) {
+        renderLogin(response, { error: error.message, next: safeNextPath(url.searchParams.get("next")) });
+      }
       return;
     }
 
@@ -61,7 +88,7 @@ const server = http.createServer((request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/") {
-      handleLauncher(request, response);
+      await handleLauncher(request, response);
       return;
     }
 
@@ -69,14 +96,20 @@ const server = http.createServer((request, response) => {
   } catch (error) {
     send(response, 500, pageShell({ title: "App login error", body: `<h1>App login error</h1><p>${escapeHtml(error.message)}</p>` }));
   }
-});
+}
 
-server.listen(port, host, () => {
-  console.log(`Jenny Apps auth server: http://${host}:${port}/`);
-});
+async function bootstrapDatabase() {
+  if (!databasePool) return;
 
-function handleAuthCheck(request, response) {
-  const session = readSession(request);
+  await ensureAppsAuthSchema(databasePool);
+  const accountCount = await countAccounts(databasePool);
+  if (!accountCount) {
+    console.warn("Apps auth database is ready, but no app accounts exist yet.");
+  }
+}
+
+async function handleAuthCheck(request, response) {
+  const session = await readSession(request);
   if (!session) {
     send(response, 401, "", "text/plain; charset=utf-8", { "Cache-Control": "no-store" });
     return;
@@ -92,9 +125,9 @@ function handleAuthCheck(request, response) {
   send(response, 204, "", "text/plain; charset=utf-8", authHeaders(session));
 }
 
-function handleLoginGet(request, response, url) {
+async function handleLoginGet(request, response, url) {
   const next = safeNextPath(url.searchParams.get("next"));
-  if (readSession(request)) {
+  if (await readSession(request)) {
     redirect(response, next || "/");
     return;
   }
@@ -105,7 +138,7 @@ function handleLoginGet(request, response, url) {
   });
 }
 
-function handleLoginPost(request, response, body) {
+async function handleLoginPost(request, response, body) {
   const params = new URLSearchParams(body);
   const username = normalizeUsername(params.get("username"));
   const password = params.get("password") || "";
@@ -122,8 +155,9 @@ function handleLoginPost(request, response, body) {
     return;
   }
 
-  const user = users.find((item) => item.username === username);
+  const user = await findConfiguredUser(username);
   if (!user || !verifyPassword(password, user.passwordHash)) {
+    await recordLogin(request, { username, success: false });
     renderLogin(response, {
       username,
       next,
@@ -133,6 +167,7 @@ function handleLoginPost(request, response, body) {
   }
 
   loginAttempts.delete(key);
+  await recordLogin(request, { username, accountId: user.id, success: true });
   setSessionCookie(response, {
     username: user.username,
     name: user.name || user.username,
@@ -141,8 +176,8 @@ function handleLoginPost(request, response, body) {
   redirect(response, next || "/");
 }
 
-function handleLauncher(request, response) {
-  const session = readSession(request);
+async function handleLauncher(request, response) {
+  const session = await readSession(request);
   if (!session) {
     redirect(response, "/login?next=/");
     return;
@@ -386,7 +421,7 @@ function pageShell({ title, body }) {
 </html>`;
 }
 
-function readSession(request) {
+async function readSession(request) {
   const cookies = parseCookies(request.headers.cookie || "");
   const raw = cookies[cookieName];
   if (!raw) return null;
@@ -398,8 +433,14 @@ function readSession(request) {
   try {
     const payload = JSON.parse(Buffer.from(payloadText, "base64url").toString("utf8"));
     if (!payload.exp || Number(payload.exp) < Math.floor(Date.now() / 1000)) return null;
-    if (!users.some((user) => user.username === payload.username)) return null;
-    return payload;
+    const user = await findConfiguredUser(payload.username);
+    if (!user) return null;
+    return {
+      ...payload,
+      username: user.username,
+      name: user.name || payload.name || user.username,
+      apps: user.apps || [],
+    };
   } catch {
     return null;
   }
@@ -427,21 +468,25 @@ function sign(value) {
   return crypto.createHmac("sha256", authSecret).update(value).digest("base64url");
 }
 
-function timingSafeEqual(a, b) {
-  const left = Buffer.from(String(a));
-  const right = Buffer.from(String(b));
-  return left.length === right.length && crypto.timingSafeEqual(left, right);
+async function findConfiguredUser(username) {
+  const normalizedUsername = normalizeUsername(username);
+  if (!normalizedUsername) return null;
+  if (databasePool) return findAccountByUsername(databasePool, normalizedUsername);
+  return fileUsers.find((user) => user.username === normalizedUsername) || null;
 }
 
-function verifyPassword(password, hash) {
-  const [kind, iterationsText, salt, expected] = String(hash || "").split("$");
-  if (kind !== "pbkdf2-sha256" || !iterationsText || !salt || !expected) return false;
+async function recordLogin(request, options) {
+  if (!databasePool) return;
 
-  const iterations = Number.parseInt(iterationsText, 10);
-  if (!Number.isFinite(iterations) || iterations < 100_000) return false;
-
-  const actual = crypto.pbkdf2Sync(password, salt, iterations, 32, "sha256").toString("base64url");
-  return timingSafeEqual(actual, expected);
+  try {
+    await recordLoginEvent(databasePool, {
+      ...options,
+      clientIp: clientIp(request),
+      userAgent: String(request.headers["user-agent"] || ""),
+    });
+  } catch (error) {
+    console.warn(`Could not record apps login event: ${error.message}`);
+  }
 }
 
 function loadUsers() {
@@ -534,10 +579,6 @@ function clientIp(request) {
   return forwarded || request.socket.remoteAddress || "unknown";
 }
 
-function normalizeUsername(value) {
-  return String(value || "").trim().toLowerCase();
-}
-
 function normalizePrefix(value) {
   const text = String(value || "").trim();
   if (!text || text === "/") return "/";
@@ -614,30 +655,4 @@ function numberFromEnv(name, fallback, min, max) {
   const value = Number.parseInt(process.env[name] || "", 10);
   if (Number.isNaN(value)) return fallback;
   return Math.max(min, Math.min(max, value));
-}
-
-function loadEnv(file) {
-  if (!fs.existsSync(file)) return;
-
-  for (const rawLine of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-
-    const eq = line.indexOf("=");
-    if (eq === -1) continue;
-
-    const key = line.slice(0, eq).trim();
-    let value = line.slice(eq + 1).trim();
-
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-
-    if (!process.env[key]) {
-      process.env[key] = value;
-    }
-  }
 }

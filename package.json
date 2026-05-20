@@ -5,6 +5,7 @@
   "description": "Jenny's Contents content strategy dashboard and social data access helpers.",
   "type": "module",
   "scripts": {
+    "apps:account": "node scripts/apps-auth-account.mjs",
     "apps:auth": "node scripts/apps-auth-server.mjs",
     "apps:hash-password": "node scripts/apps-auth-password.mjs",
     "check:access": "node scripts/check-access.mjs",
@@ -12,5 +13,8 @@
     "start": "node scripts/serve-local.mjs",
     "strategy:daily": "node scripts/run-content-strategy.mjs",
     "tiktok:exchange": "node scripts/tiktok-exchange-code.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.21.0"
   }
 }
