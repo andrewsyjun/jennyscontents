@@ -2992,15 +2992,15 @@ function areSimilarVideoJobs(a, b) {
   if (!a || !b) return false;
   if (a.id && b.id && a.id === b.id) return true;
   if (a.ideaId && b.ideaId && a.ideaId === b.ideaId) return true;
-  if (a.ideaId && b.ideaId && a.ideaId !== b.ideaId) {
-    return (
-      normalizedPrompt(a.prompt) &&
-      normalizedPrompt(a.prompt) === normalizedPrompt(b.prompt)
-    );
-  }
+  if (normalizedPrompt(a.prompt) && normalizedPrompt(a.prompt) === normalizedPrompt(b.prompt)) return true;
+
   const titleScore = textSimilarity(a.title || "", b.title || "");
   const promptScore = textSimilarity(videoJobPromptOpening(a), videoJobPromptOpening(b));
-  return titleScore >= 0.2 || promptScore >= 0.48 || textSimilarity(videoJobSimilarityText(a), videoJobSimilarityText(b)) >= 0.52;
+  return (
+    titleScore >= 0.55 ||
+    promptScore >= 0.85 ||
+    textSimilarity(videoJobSimilarityText(a), videoJobSimilarityText(b)) >= 0.72
+  );
 }
 
 function preferredVideoJob(a, b) {
@@ -3018,6 +3018,7 @@ function preferredVideoJob(a, b) {
 
 function videoJobQualityScore(row) {
   return (
+    (isCurrentSavedIdeaVideo(row) ? 160 : 0) +
     (row?.localUrl || row?.videoUrl ? 200 : 0) +
     (row?.status === "completed" ? 80 : 0) +
     (videoJobRequestId(row) ? 50 : 0) +
@@ -3025,6 +3026,11 @@ function videoJobQualityScore(row) {
     durationQualityScore(row?.prompt || "") +
     recencyQualityScore(row?.updatedAt || row?.createdAt)
   );
+}
+
+function isCurrentSavedIdeaVideo(row) {
+  if (!row?.ideaId) return false;
+  return readSavedIdeas().some((savedIdea) => savedIdea.id && savedIdea.id === row.ideaId);
 }
 
 function videoJobSimilarityText(row) {
@@ -3079,6 +3085,7 @@ function similarityTokens(value) {
     .toLowerCase()
     .replace(/\b(relocating|relocation|moving|move)\b/g, "move")
     .replace(/\b(showings?|touring|tours?|walkthroughs?|buying|buy|buyers?|purchase|purchasing|hunting|shopping|searching)\b/g, "decision")
+    .replace(/\b(choose|choosing|pick|picking|picked)\b/g, "choose")
     .replace(/\b(houses?|homes?)\b/g, "home")
     .replace(/\b(asks?|asking|checks?|questions?|things?|tips?)\b/g, "check")
     .replace(/\b(don'?t|do not|avoid|stop)\b/g, "avoid")
