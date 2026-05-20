@@ -3078,9 +3078,9 @@ function similarityTokens(value) {
   const normalized = String(value || "")
     .toLowerCase()
     .replace(/\b(relocating|relocation|moving|move)\b/g, "move")
-    .replace(/\b(showings?|touring|tours?|walkthroughs?|buying|buy|buyers?|purchase|purchasing)\b/g, "decision")
+    .replace(/\b(showings?|touring|tours?|walkthroughs?|buying|buy|buyers?|purchase|purchasing|hunting|shopping|searching)\b/g, "decision")
     .replace(/\b(houses?|homes?)\b/g, "home")
-    .replace(/\b(checks?|things?|tips?)\b/g, "check")
+    .replace(/\b(asks?|asking|checks?|questions?|things?|tips?)\b/g, "check")
     .replace(/\b(don'?t|do not|avoid|stop)\b/g, "avoid")
     .replace(/\b(dfw|north dallas|dallas|jun|residential|group|real estate|realtor)\b/g, " ")
     .replace(/[^a-z0-9]+/g, " ");
@@ -3108,6 +3108,11 @@ function similarityTokens(value) {
     "second",
     "style",
     "brand",
+    "first",
+    "single",
+    "start",
+    "waste",
+    "weekend",
   ]);
 
   return new Set(
