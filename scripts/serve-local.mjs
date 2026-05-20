@@ -954,6 +954,20 @@ function xLoginScopes() {
   return scopes.length ? scopes : ["tweet.read", "users.read", "offline.access"];
 }
 
+function publicAppPath(suffix = "/") {
+  const base = normalizePublicBasePath(process.env.PUBLIC_APP_BASE_PATH || "");
+  const value = String(suffix || "/");
+  if (!base) return value;
+  if (value === "/") return `${base}/`;
+  return `${base}${value.startsWith("/") ? value : `/${value}`}`;
+}
+
+function normalizePublicBasePath(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed || trimmed === "/") return "";
+  return `/${trimmed.replace(/^\/+|\/+$/g, "")}`;
+}
+
 function xBasicAuthHeader() {
   return `Basic ${Buffer.from(`${process.env.X_CLIENT_ID}:${process.env.X_CLIENT_SECRET}`).toString("base64")}`;
 }
@@ -981,7 +995,7 @@ function authResultPage({ title, status, details }) {
       <ul>
         ${details.map((detail) => `<li>${escapeHtml(detail)}</li>`).join("")}
       </ul>
-      <p><a href="/">Return to Jenny's Contents</a></p>
+      <p><a href="${escapeHtml(publicAppPath("/"))}">Return to Jenny's Contents</a></p>
     </main>
   </body>
 </html>`;

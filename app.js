@@ -10,6 +10,7 @@ const META_APP_ID = "859442203159885";
 const FACEBOOK_LOGIN_CONFIG_ID = "2173649920103461";
 const GRAPH_VERSION = "v25.0";
 const GITHUB_PAGES_BASE = "/jennyscontents";
+const ADMIN_CONTENTS_BASE = "/admin/contents";
 const REVIEW_HASHTAGS = [
   "dfwrealestate",
   "dallasrealestate",
@@ -130,7 +131,32 @@ function isStaticReviewMode() {
 }
 
 function appBasePath() {
-  return window.location.pathname.startsWith(GITHUB_PAGES_BASE) ? GITHUB_PAGES_BASE : "";
+  const pathname = window.location.pathname.replace(/\/+$/, "") || "/";
+  if (pathname === ADMIN_CONTENTS_BASE || pathname.startsWith(`${ADMIN_CONTENTS_BASE}/`)) {
+    return ADMIN_CONTENTS_BASE;
+  }
+  if (pathname === GITHUB_PAGES_BASE || pathname.startsWith(`${GITHUB_PAGES_BASE}/`)) {
+    return GITHUB_PAGES_BASE;
+  }
+  return "";
+}
+
+function appPath(path = "/") {
+  const value = String(path || "/");
+  if (/^(?:https?:|mailto:|tel:|data:|blob:)/i.test(value)) return value;
+
+  const base = appBasePath();
+  if (!base) return value;
+
+  const suffix = value.startsWith("/") ? value : `/${value}`;
+  if (suffix === "/") return `${base}/`;
+  return `${base}${suffix}`;
+}
+
+function appMediaUrl(url) {
+  const value = String(url || "");
+  if (!value || /^(?:https?:|data:|blob:)/i.test(value)) return value;
+  return appPath(value);
 }
 
 function githubReviewUrl() {
@@ -292,7 +318,7 @@ async function loadSignalData(sourceId = "instagram") {
       return;
     }
 
-    const response = await fetch(source.endpoint, { cache: "no-store" });
+    const response = await fetch(appPath(source.endpoint), { cache: "no-store" });
     let payload = useCachedPayloadIfNeeded(sourceId, await response.json());
     payload = mergeImportedSignals(sourceId, payload);
     if (!response.ok || !payload.ok) {
@@ -936,7 +962,7 @@ function renderConnectionAction(payload) {
   connect.removeAttribute("title");
 
   if (sourceId === "instagram") {
-    connect.href = isStaticReviewMode() ? facebookReviewLoginUrl() : "/auth/facebook/start";
+    connect.href = isStaticReviewMode() ? facebookReviewLoginUrl() : appPath("/auth/facebook/start");
     connect.hidden = oauthConnected;
     connect.textContent = oauthConnected ? "Instagram connected" : "Connect Instagram";
     if (isStaticReviewMode()) {
@@ -946,7 +972,7 @@ function renderConnectionAction(payload) {
   }
 
   if (sourceId === "tiktok") {
-    connect.href = "/auth/tiktok/start";
+    connect.href = appPath("/auth/tiktok/start");
     connect.hidden = oauthConnected;
     connect.textContent = oauthConnected ? "TikTok connected" : "Connect TikTok";
     connect.title = "Connect TikTok through the local OAuth callback.";
@@ -955,7 +981,7 @@ function renderConnectionAction(payload) {
 
   if (sourceId === "x") {
     const xConnected = payload.account?.authMode === "oauth2_user";
-    connect.href = "/auth/x/start";
+    connect.href = appPath("/auth/x/start");
     connect.hidden = xConnected;
     connect.textContent = xConnected ? "X connected" : "Connect X";
     connect.title = "Connect X through the local OAuth 2.0 callback.";
@@ -1845,7 +1871,7 @@ async function generateConcreteIdeaWithAI(payload, fallbackIdea) {
   const sourceId = state.signalSource || "instagram";
   const source = signalSources[sourceId] || signalSources.instagram;
   const analysis = payload.analysis || {};
-  const response = await fetch("/api/ideas/generate", {
+  const response = await fetch(appPath("/api/ideas/generate"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -2078,7 +2104,7 @@ function renderGeneratedVideo(savedIdea) {
     return;
   }
 
-  video.src = videoUrl;
+  video.src = appMediaUrl(videoUrl);
   video.hidden = false;
   status.hidden = true;
 }
@@ -2484,7 +2510,7 @@ function renderSelectedVideo(job) {
 
   const videoUrl = job.localUrl || job.videoUrl || "";
   if (videoUrl) {
-    player.src = videoUrl;
+    player.src = appMediaUrl(videoUrl);
     player.hidden = false;
   } else {
     player.hidden = true;
@@ -2595,7 +2621,7 @@ async function createVideoForJob(id, options = {}) {
   setVideoManagerStatus(options.force ? "Regenerating video job..." : "Creating video job...");
 
   try {
-    const response = await fetch("/api/videos/create", {
+    const response = await fetch(appPath("/api/videos/create"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -2641,7 +2667,7 @@ async function refreshVideoJob(id, options = {}) {
 
   try {
     const response = await fetch(
-      `/api/videos/status?id=${encodeURIComponent(requestId)}&provider=${encodeURIComponent(videoJobProvider(job))}`,
+      appPath(`/api/videos/status?id=${encodeURIComponent(requestId)}&provider=${encodeURIComponent(videoJobProvider(job))}`),
       {
         cache: "no-store",
       }
@@ -2716,7 +2742,7 @@ async function handleVideoUploadFile(event) {
     body.append("title", job.title || "Uploaded video");
     body.append("ideaId", job.ideaId || "");
 
-    const response = await fetch("/api/videos/upload", {
+    const response = await fetch(appPath("/api/videos/upload"), {
       method: "POST",
       body,
     });
@@ -3083,7 +3109,7 @@ function writeSavedIdeas(rows) {
 
 async function loadFilesystemLibrary() {
   try {
-    const response = await fetch("/api/library", { cache: "no-store" });
+    const response = await fetch(appPath("/api/library"), { cache: "no-store" });
     const payload = await response.json();
     if (!response.ok || !payload.ok) {
       throw new Error(payload.message || "Library could not be loaded.");
@@ -3160,7 +3186,7 @@ async function persistFilesystemLibrary() {
     : readLocalRows(VIDEO_JOBS_KEY);
 
   try {
-    const response = await fetch("/api/library", {
+    const response = await fetch(appPath("/api/library"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ savedIdeas, videoJobs }),
@@ -3414,7 +3440,7 @@ function renderSavedIdeaVideoBlock(savedIdea, relatedJob) {
     outputLabel.textContent = "Generated video";
     const video = document.createElement("video");
     video.controls = true;
-    video.src = videoUrl;
+    video.src = appMediaUrl(videoUrl);
     output.append(outputLabel, video);
     block.append(output);
   }
@@ -3720,7 +3746,7 @@ async function saveBriefToDrive() {
   }
 
   try {
-    const response = await fetch("/api/brief/save", {
+    const response = await fetch(appPath("/api/brief/save"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -4086,7 +4112,7 @@ function setupReviewMode() {
     return;
   }
 
-  connect.href = "/auth/facebook/start";
+  connect.href = appPath("/auth/facebook/start");
 }
 
 async function bootApp() {
