@@ -3,7 +3,9 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import nodemailer from "nodemailer";
 import {
+  createPasswordResetToken,
   consumePasswordResetToken,
   countAccounts,
   createPoolFromEnv,
@@ -33,6 +35,7 @@ const databasePool = createPoolFromEnv();
 const fileUsers = databasePool ? [] : loadUsers();
 const apps = loadApps();
 const routeMap = loadRouteMap();
+const mailer = createMailerFromEnv();
 const loginAttempts = new Map();
 
 if (!authSecret || authSecret.length < 32) {
@@ -92,7 +95,7 @@ async function routeRequest(request, response) {
 
     if (request.method === "POST" && url.pathname === "/reset-password") {
       try {
-        await handleResetPasswordPost(response, await readBody(request));
+        await handleResetPasswordPost(request, response, await readBody(request));
       } catch (error) {
         renderResetPassword(response, { error: error.message });
       }
@@ -297,7 +300,9 @@ async function handleResetPasswordGet(response, url) {
 
   if (!token) {
     renderResetPassword(response, {
-      notice: "Ask an administrator for a password reset link.",
+      notice: url.searchParams.get("sent")
+        ? "If that account exists, a reset link has been emailed."
+        : "",
     });
     return;
   }
@@ -316,11 +321,17 @@ async function handleResetPasswordGet(response, url) {
   });
 }
 
-async function handleResetPasswordPost(response, body) {
+async function handleResetPasswordPost(request, response, body) {
   if (!databasePool) throw new Error("Password reset links are not available in file-backed auth mode.");
 
   const params = new URLSearchParams(body);
   const token = String(params.get("token") || "");
+  const username = normalizeUsername(params.get("username"));
+  if (!token) {
+    await handleResetRequest(request, response, username);
+    return;
+  }
+
   const password = String(params.get("password") || "");
   const confirmPassword = String(params.get("confirmPassword") || "");
 
@@ -349,7 +360,56 @@ async function handleResetPasswordPost(response, body) {
   });
 }
 
-function renderResetPassword(response, { token = "", username = "", error = "", notice = "", done = false } = {}) {
+async function handleResetRequest(request, response, username) {
+  const key = `reset:${clientIp(request)}:${username || "unknown"}`;
+  const attempt = checkLoginRate(key);
+  if (!attempt.allowed) {
+    renderResetPassword(response, {
+      requestUsername: username,
+      error: `Too many reset requests. Try again in ${Math.ceil(attempt.retryAfterMs / 1000)} seconds.`,
+    });
+    return;
+  }
+
+  if (!username || !username.includes("@")) {
+    renderResetPassword(response, {
+      requestUsername: username,
+      error: "Enter the email address for your app account.",
+    });
+    return;
+  }
+
+  if (!mailer && process.env.APPS_AUTH_EMAIL_DRY_RUN !== "1") {
+    renderResetPassword(response, {
+      requestUsername: username,
+      error: "Password reset email is not configured.",
+    });
+    return;
+  }
+
+  const user = await findConfiguredUser(username);
+  if (user) {
+    const reset = await createPasswordResetToken(databasePool, user.username, {
+      expiresHours: numberFromEnv("APPS_AUTH_RESET_TOKEN_HOURS", 24, 1, 168),
+    });
+    const link = `${publicBaseUrl()}/reset-password?token=${encodeURIComponent(reset.token)}`;
+    await sendPasswordResetEmail({
+      to: user.username,
+      name: user.name || user.username,
+      link,
+      expiresHours: reset.expiresHours,
+    });
+  }
+
+  renderResetPassword(response, {
+    notice: "If that account exists, a reset link has been emailed.",
+  });
+}
+
+function renderResetPassword(
+  response,
+  { token = "", username = "", requestUsername = "", error = "", notice = "", done = false } = {}
+) {
   const message = error
     ? `<p class="form-message error">${escapeHtml(error)}</p>`
     : notice
@@ -370,7 +430,7 @@ function renderResetPassword(response, { token = "", username = "", error = "", 
         <section class="login-card">
           <p class="eyebrow">Jenny Apps</p>
           <h1>Set password</h1>
-          <p class="login-copy">${username ? `Choose a password for ${escapeHtml(username)}.` : "Use the reset link from your administrator."}</p>
+          <p class="login-copy">${username ? `Choose a password for ${escapeHtml(username)}.` : "Enter your app account email. Existing accounts will receive a reset link."}</p>
           ${message}
           ${token ? `<form method="post" action="/reset-password">
             <input type="hidden" name="token" value="${escapeHtml(token)}" />
@@ -383,7 +443,13 @@ function renderResetPassword(response, { token = "", username = "", error = "", 
               <input name="confirmPassword" type="password" autocomplete="new-password" />
             </label>
             <button type="submit">Save password</button>
-          </form>` : ""}
+          </form>` : `<form method="post" action="/reset-password">
+            <label>
+              Account email
+              <input name="username" type="email" autocomplete="email" value="${escapeHtml(requestUsername)}" autofocus />
+            </label>
+            <button type="submit">Email reset link</button>
+          </form>`}
           <p class="form-footnote"><a href="/login">Return to sign in</a></p>
         </section>
       </main>`;
@@ -728,6 +794,44 @@ async function recordLogin(request, options) {
   }
 }
 
+async function sendPasswordResetEmail({ to, name, link, expiresHours }) {
+  if (process.env.APPS_AUTH_EMAIL_DRY_RUN === "1") {
+    console.log(`Password reset link for ${to}: ${link}`);
+    return;
+  }
+
+  if (!mailer) {
+    throw new Error("Password reset email is not configured.");
+  }
+
+  const from = process.env.APPS_AUTH_EMAIL_FROM || process.env.NOTIFY_FROM || process.env.SMTP_USER;
+  const replyTo = process.env.APPS_AUTH_EMAIL_REPLY_TO || process.env.NOTIFY_REPLY_TO || from;
+  const subject = "Jenny Apps password reset";
+  const safeName = name || to;
+
+  await mailer.sendMail({
+    from,
+    to,
+    replyTo,
+    subject,
+    text: [
+      `Hi ${safeName},`,
+      "",
+      "Use this link to set or reset your Jenny Apps password:",
+      link,
+      "",
+      `This link expires in ${expiresHours} hours and can be used once.`,
+      "",
+      "If you did not request this, you can ignore this email.",
+    ].join("\n"),
+    html: `<p>Hi ${escapeHtml(safeName)},</p>
+      <p>Use this link to set or reset your Jenny Apps password:</p>
+      <p><a href="${escapeHtml(link)}">Set password</a></p>
+      <p>This link expires in ${escapeHtml(expiresHours)} hours and can be used once.</p>
+      <p>If you did not request this, you can ignore this email.</p>`,
+  });
+}
+
 function loadUsers() {
   const fromFile = process.env.APPS_AUTH_USERS_FILE;
   const raw = fromFile
@@ -796,6 +900,30 @@ function authHeaders(session) {
     "X-Apps-Name": session.name || "",
     "X-Apps-Apps": Array.isArray(session.apps) ? session.apps.join(",") : "",
   };
+}
+
+function createMailerFromEnv() {
+  const hostValue = process.env.APPS_AUTH_SMTP_HOST || process.env.SMTP_HOST || "";
+  const user = process.env.APPS_AUTH_SMTP_USER || process.env.SMTP_USER || "";
+  const pass = process.env.APPS_AUTH_SMTP_PASS || process.env.SMTP_PASS || "";
+  if (!hostValue || !user || !pass) return null;
+
+  const portValue = Number.parseInt(process.env.APPS_AUTH_SMTP_PORT || process.env.SMTP_PORT || "465", 10);
+  const secureValue = process.env.APPS_AUTH_SMTP_SECURE || process.env.SMTP_SECURE || "true";
+
+  return nodemailer.createTransport({
+    host: hostValue,
+    port: Number.isFinite(portValue) ? portValue : 465,
+    secure: secureValue !== "false",
+    auth: {
+      user,
+      pass,
+    },
+  });
+}
+
+function publicBaseUrl() {
+  return String(process.env.APPS_AUTH_PUBLIC_URL || "https://apps.junresidential.com").replace(/\/+$/, "");
 }
 
 function checkLoginRate(key) {
