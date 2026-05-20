@@ -173,6 +173,29 @@ async function handleLoginGet(request, response, url) {
     return;
   }
 
+  const mfaState = readMfaState(request);
+  if (mfaState?.username) {
+    const user = await findConfiguredUser(mfaState.username);
+    if (user && mfaState.setupSecret) {
+      setMfaCookie(response, mfaState);
+      await renderTotpSetup(response, {
+        username: user.username,
+        next: mfaState.next || next,
+        secret: mfaState.setupSecret,
+      });
+      return;
+    }
+
+    if (user && user.totpEnabled && user.totpSecret) {
+      setMfaCookie(response, mfaState);
+      renderTotpChallenge(response, {
+        username: user.username,
+        next: mfaState.next || next,
+      });
+      return;
+    }
+  }
+
   renderLogin(response, {
     next,
     notice: url.searchParams.get("signedOut") ? "Signed out." : "",
