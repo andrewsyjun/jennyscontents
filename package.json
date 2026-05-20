@@ -5,6 +5,8 @@
   "description": "Jenny's Contents content strategy dashboard and social data access helpers.",
   "type": "module",
   "scripts": {
+    "apps:auth": "node scripts/apps-auth-server.mjs",
+    "apps:hash-password": "node scripts/apps-auth-password.mjs",
     "check:access": "node scripts/check-access.mjs",
     "drive:auth": "node scripts/google-drive-auth.mjs",
     "start": "node scripts/serve-local.mjs",

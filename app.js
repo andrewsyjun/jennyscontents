@@ -11,6 +11,7 @@ const FACEBOOK_LOGIN_CONFIG_ID = "2173649920103461";
 const GRAPH_VERSION = "v25.0";
 const GITHUB_PAGES_BASE = "/jennyscontents";
 const ADMIN_CONTENTS_BASE = "/admin/contents";
+const APPS_CONTENTS_BASE = "/contents";
 const REVIEW_HASHTAGS = [
   "dfwrealestate",
   "dallasrealestate",
@@ -132,6 +133,9 @@ function isStaticReviewMode() {
 
 function appBasePath() {
   const pathname = window.location.pathname.replace(/\/+$/, "") || "/";
+  if (pathname === APPS_CONTENTS_BASE || pathname.startsWith(`${APPS_CONTENTS_BASE}/`)) {
+    return APPS_CONTENTS_BASE;
+  }
   if (pathname === ADMIN_CONTENTS_BASE || pathname.startsWith(`${ADMIN_CONTENTS_BASE}/`)) {
     return ADMIN_CONTENTS_BASE;
   }
