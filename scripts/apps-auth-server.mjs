@@ -16,6 +16,7 @@ import {
   loadEnv,
   normalizeUsername,
   recordLoginEvent,
+  setAccountTotpSecret,
   timingSafeEqual,
   updateAccountPassword,
   verifyPassword,
@@ -29,7 +30,10 @@ loadEnv(process.env.APPS_AUTH_ENV_FILE || "/etc/jenny-apps-auth/apps-auth.env");
 const host = process.env.APPS_AUTH_HOST || "127.0.0.1";
 const port = numberFromEnv("APPS_AUTH_PORT", 4180, 1024, 65535);
 const cookieName = process.env.APPS_AUTH_COOKIE_NAME || "jr_apps_session";
+const mfaCookieName = `${cookieName}_mfa`;
 const sessionSeconds = numberFromEnv("APPS_AUTH_SESSION_SECONDS", 12 * 60 * 60, 900, 30 * 24 * 60 * 60);
+const mfaSeconds = numberFromEnv("APPS_AUTH_MFA_SECONDS", 10 * 60, 60, 60 * 60);
+const requireTotp = process.env.APPS_AUTH_REQUIRE_TOTP !== "0";
 const authSecret = process.env.APPS_AUTH_SECRET || "";
 const databasePool = createPoolFromEnv();
 const fileUsers = databasePool ? [] : loadUsers();
@@ -118,6 +122,7 @@ async function routeRequest(request, response) {
 
     if (request.method === "GET" && url.pathname === "/logout") {
       clearSessionCookie(response);
+      clearMfaCookie(response);
       redirect(response, "/login?signedOut=1");
       return;
     }
@@ -175,6 +180,12 @@ async function handleLoginGet(request, response, url) {
 
 async function handleLoginPost(request, response, body) {
   const params = new URLSearchParams(body);
+  const mfaStage = String(params.get("mfaStage") || "");
+  if (mfaStage) {
+    await handleMfaPost(request, response, params, mfaStage);
+    return;
+  }
+
   const username = normalizeUsername(params.get("username"));
   const password = params.get("password") || "";
   const next = safeNextPath(params.get("next"));
@@ -202,7 +213,111 @@ async function handleLoginPost(request, response, body) {
   }
 
   loginAttempts.delete(key);
+
+  if (requireTotp) {
+    if (!databasePool) {
+      renderLogin(response, {
+        username,
+        next,
+        error: "Authenticator app setup requires database-backed app accounts.",
+      });
+      return;
+    }
+
+    if (user.totpEnabled && user.totpSecret) {
+      setMfaCookie(response, { username: user.username, next });
+      renderTotpChallenge(response, { username: user.username, next });
+      return;
+    }
+
+    const secret = generateTotpSecret();
+    setMfaCookie(response, { username: user.username, next, setupSecret: secret });
+    renderTotpSetup(response, { username: user.username, next, secret });
+    return;
+  }
+
   await recordLogin(request, { username, accountId: user.id, success: true });
+  setSessionCookie(response, {
+    username: user.username,
+    name: user.name || user.username,
+    apps: user.apps || [],
+  });
+  redirect(response, next || "/");
+}
+
+async function handleMfaPost(request, response, params, mfaStage) {
+  if (!databasePool) throw new Error("Authenticator app setup requires database-backed app accounts.");
+
+  const state = readMfaState(request);
+  const next = safeNextPath(params.get("next") || state?.next);
+  const code = normalizeTotpCode(params.get("totpCode"));
+  const username = normalizeUsername(state?.username);
+  const key = `mfa:${clientIp(request)}:${username || "unknown"}`;
+  const attempt = checkLoginRate(key);
+
+  if (!state || !username) {
+    clearMfaCookie(response);
+    renderLogin(response, {
+      next,
+      error: "Your verification window expired. Sign in again.",
+    });
+    return;
+  }
+
+  const user = await findConfiguredUser(username);
+  if (!user) {
+    clearMfaCookie(response);
+    renderLogin(response, {
+      next,
+      error: "Your account could not be verified. Sign in again.",
+    });
+    return;
+  }
+
+  if (!attempt.allowed) {
+    const error = `Too many verification attempts. Try again in ${Math.ceil(attempt.retryAfterMs / 1000)} seconds.`;
+    if (state.setupSecret) {
+      setMfaCookie(response, state);
+      renderTotpSetup(response, { username: user.username, next, secret: state.setupSecret, error });
+      return;
+    }
+
+    setMfaCookie(response, state);
+    renderTotpChallenge(response, { username: user.username, next, error });
+    return;
+  }
+
+  const secret = state.setupSecret || user.totpSecret;
+  if (!secret || !verifyTotpCode(secret, code)) {
+    await recordLogin(request, { username: user.username, accountId: user.id, success: false });
+    const error = "That authenticator code was not recognized.";
+    if (state.setupSecret) {
+      setMfaCookie(response, state);
+      renderTotpSetup(response, { username: user.username, next, secret: state.setupSecret, error });
+      return;
+    }
+
+    setMfaCookie(response, state);
+    renderTotpChallenge(response, { username: user.username, next, error });
+    return;
+  }
+
+  if (state.setupSecret) {
+    const account = await setAccountTotpSecret(databasePool, user.username, state.setupSecret);
+    if (!account) {
+      clearMfaCookie(response);
+      renderLogin(response, {
+        username: user.username,
+        next,
+        error: "Authenticator setup could not be saved. Sign in again.",
+      });
+      return;
+    }
+  }
+
+  loginAttempts.delete(key);
+  await recordLogin(request, { username: user.username, accountId: user.id, success: true });
+  clearMfaCookie(response);
   setSessionCookie(response, {
     username: user.username,
     name: user.name || user.username,
@@ -268,7 +383,7 @@ function renderLogin(response, { username = "", next = "/", error = "", notice =
         <section class="login-card">
           <p class="eyebrow">Jenny Apps</p>
           <h1>Sign in</h1>
-          <p class="login-copy">Use this workspace for internal tools like content planning and client operations.</p>
+          <p class="login-copy">Use this workspace for internal tools like content planning, client operations, and financial review. Password and authenticator verification are required.</p>
           ${message}
           <form method="post" action="/login">
             <input type="hidden" name="next" value="${escapeHtml(safeNextPath(next))}" />
@@ -283,6 +398,72 @@ function renderLogin(response, { username = "", next = "/", error = "", notice =
             <button type="submit">Sign in</button>
           </form>
           <p class="form-footnote"><a href="/reset-password">Set or reset password</a></p>
+        </section>
+      </main>`,
+    })
+  );
+}
+
+function renderTotpSetup(response, { username = "", next = "/", secret = "", error = "" } = {}) {
+  const message = error ? `<p class="form-message error">${escapeHtml(error)}</p>` : "";
+  const setupUrl = otpauthUrl({ username, secret });
+
+  send(
+    response,
+    200,
+    pageShell({
+      title: "Set Up Authenticator",
+      body: `<main class="login-shell">
+        <section class="login-card security-card">
+          <p class="eyebrow">Jenny Apps</p>
+          <h1>Set up 2FA</h1>
+          <p class="login-copy">Add this account to Google Authenticator, Microsoft Authenticator, 1Password, or another authenticator app, then enter the 6-digit code.</p>
+          ${message}
+          <div class="security-panel">
+            <span class="security-label">Manual setup key</span>
+            <code class="secret-code">${escapeHtml(formatTotpSecret(secret))}</code>
+            <a class="setup-link" href="${escapeHtml(setupUrl)}">Open authenticator setup link</a>
+          </div>
+          <form method="post" action="/login">
+            <input type="hidden" name="mfaStage" value="setup" />
+            <input type="hidden" name="next" value="${escapeHtml(safeNextPath(next))}" />
+            <label>
+              6-digit code
+              <input name="totpCode" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9 ]{6,}" autofocus />
+            </label>
+            <button type="submit">Finish setup</button>
+          </form>
+          <p class="form-footnote"><a href="/logout">Cancel and sign out</a></p>
+        </section>
+      </main>`,
+    })
+  );
+}
+
+function renderTotpChallenge(response, { username = "", next = "/", error = "" } = {}) {
+  const message = error ? `<p class="form-message error">${escapeHtml(error)}</p>` : "";
+
+  send(
+    response,
+    200,
+    pageShell({
+      title: "Authenticator Code",
+      body: `<main class="login-shell">
+        <section class="login-card security-card">
+          <p class="eyebrow">Jenny Apps</p>
+          <h1>Enter 2FA code</h1>
+          <p class="login-copy">${escapeHtml(username)} needs a 6-digit code from your authenticator app.</p>
+          ${message}
+          <form method="post" action="/login">
+            <input type="hidden" name="mfaStage" value="verify" />
+            <input type="hidden" name="next" value="${escapeHtml(safeNextPath(next))}" />
+            <label>
+              6-digit code
+              <input name="totpCode" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9 ]{6,}" autofocus />
+            </label>
+            <button type="submit">Verify and continue</button>
+          </form>
+          <p class="form-footnote"><a href="/logout">Cancel and sign out</a></p>
         </section>
       </main>`,
     })
@@ -661,6 +842,41 @@ function pageShell({ title, body }) {
         font-weight: 800;
         text-decoration: none;
       }
+      .security-card {
+        width: min(100%, 480px);
+      }
+      .security-panel {
+        display: grid;
+        gap: 10px;
+        margin: 0 0 18px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px;
+        background: #f9f6ef;
+      }
+      .security-label {
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 850;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .secret-code {
+        display: block;
+        overflow-wrap: anywhere;
+        border-radius: 6px;
+        padding: 12px;
+        background: white;
+        color: var(--ink);
+        font: 800 1rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        letter-spacing: 0.04em;
+      }
+      .setup-link {
+        width: fit-content;
+        color: var(--accent);
+        font-weight: 800;
+        text-decoration: none;
+      }
       .launcher {
         width: min(1120px, calc(100% - 32px));
         margin: 0 auto;
@@ -762,15 +978,163 @@ function setSessionCookie(response, session) {
     })
   ).toString("base64url");
   const cookie = `${cookieName}=${payload}.${sign(payload)}; Path=/; Max-Age=${sessionSeconds}; HttpOnly; Secure; SameSite=Lax`;
-  response.setHeader("Set-Cookie", cookie);
+  appendSetCookie(response, cookie);
 }
 
 function clearSessionCookie(response) {
-  response.setHeader("Set-Cookie", `${cookieName}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
+  appendSetCookie(response, `${cookieName}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
+}
+
+function readMfaState(request) {
+  const cookies = parseCookies(request.headers.cookie || "");
+  const raw = cookies[mfaCookieName];
+  if (!raw) return null;
+
+  const [payloadText, signature] = raw.split(".");
+  if (!payloadText || !signature) return null;
+  if (!timingSafeEqual(signature, sign(payloadText))) return null;
+
+  try {
+    const payload = JSON.parse(Buffer.from(payloadText, "base64url").toString("utf8"));
+    if (!payload.exp || Number(payload.exp) < Math.floor(Date.now() / 1000)) return null;
+    return {
+      username: normalizeUsername(payload.username),
+      next: safeNextPath(payload.next),
+      setupSecret: String(payload.setupSecret || "").trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function setMfaCookie(response, state) {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = Buffer.from(
+    JSON.stringify({
+      username: normalizeUsername(state.username),
+      next: safeNextPath(state.next),
+      setupSecret: state.setupSecret ? String(state.setupSecret).trim() : "",
+      iat: now,
+      exp: now + mfaSeconds,
+      nonce: crypto.randomBytes(12).toString("base64url"),
+    })
+  ).toString("base64url");
+  const cookie = `${mfaCookieName}=${payload}.${sign(payload)}; Path=/; Max-Age=${mfaSeconds}; HttpOnly; Secure; SameSite=Lax`;
+  appendSetCookie(response, cookie);
+}
+
+function clearMfaCookie(response) {
+  appendSetCookie(response, `${mfaCookieName}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
+}
+
+function appendSetCookie(response, cookie) {
+  const existing = response.getHeader("Set-Cookie");
+  if (!existing) {
+    response.setHeader("Set-Cookie", cookie);
+    return;
+  }
+
+  response.setHeader("Set-Cookie", Array.isArray(existing) ? [...existing, cookie] : [existing, cookie]);
 }
 
 function sign(value) {
   return crypto.createHmac("sha256", authSecret).update(value).digest("base64url");
+}
+
+function generateTotpSecret() {
+  return base32Encode(crypto.randomBytes(20));
+}
+
+function otpauthUrl({ username, secret }) {
+  const issuer = process.env.APPS_AUTH_TOTP_ISSUER || "Jenny Apps";
+  const label = `${issuer}:${username}`;
+  const params = new URLSearchParams({
+    secret,
+    issuer,
+    algorithm: "SHA1",
+    digits: "6",
+    period: "30",
+  });
+  return `otpauth://totp/${encodeURIComponent(label)}?${params.toString()}`;
+}
+
+function verifyTotpCode(secret, input, window = 1) {
+  const code = normalizeTotpCode(input);
+  if (!/^\d{6}$/.test(code)) return false;
+
+  const currentStep = Math.floor(Date.now() / 1000 / 30);
+  for (let offset = -window; offset <= window; offset += 1) {
+    if (timingSafeEqual(totpCode(secret, currentStep + offset), code)) return true;
+  }
+  return false;
+}
+
+function totpCode(secret, counter) {
+  const key = base32Decode(secret);
+  const buffer = Buffer.alloc(8);
+  let value = BigInt(counter);
+  for (let index = 7; index >= 0; index -= 1) {
+    buffer[index] = Number(value & 0xffn);
+    value >>= 8n;
+  }
+
+  const hmac = crypto.createHmac("sha1", key).update(buffer).digest();
+  const offset = hmac[hmac.length - 1] & 0x0f;
+  const truncated = hmac.readUInt32BE(offset) & 0x7fffffff;
+  return String(truncated % 1_000_000).padStart(6, "0");
+}
+
+function normalizeTotpCode(value) {
+  return String(value || "").replace(/\s+/g, "").trim();
+}
+
+function formatTotpSecret(secret) {
+  return String(secret || "")
+    .replace(/\s+/g, "")
+    .replace(/(.{4})/g, "$1 ")
+    .trim();
+}
+
+function base32Encode(buffer) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = 0;
+  let value = 0;
+  let output = "";
+
+  for (const byte of buffer) {
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      output += alphabet[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+
+  if (bits > 0) {
+    output += alphabet[(value << (5 - bits)) & 31];
+  }
+  return output;
+}
+
+function base32Decode(value) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const clean = String(value || "").toUpperCase().replace(/[^A-Z2-7]/g, "");
+  let bits = 0;
+  let buffer = 0;
+  const bytes = [];
+
+  for (const char of clean) {
+    const index = alphabet.indexOf(char);
+    if (index === -1) continue;
+    buffer = (buffer << 5) | index;
+    bits += 5;
+    if (bits >= 8) {
+      bytes.push((buffer >>> (bits - 8)) & 255);
+      bits -= 8;
+    }
+  }
+
+  return Buffer.from(bytes);
 }
 
 async function findConfiguredUser(username) {

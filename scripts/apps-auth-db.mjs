@@ -22,10 +22,18 @@ export async function ensureAppsAuthSchema(pool) {
       name text not null default '',
       password_hash text not null,
       is_active boolean not null default true,
+      totp_secret text,
+      totp_enabled_at timestamptz,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now(),
       last_login_at timestamptz
     );
+
+    alter table app_accounts
+      add column if not exists totp_secret text;
+
+    alter table app_accounts
+      add column if not exists totp_enabled_at timestamptz;
 
     create table if not exists app_account_apps (
       account_id bigint not null references app_accounts(id) on delete cascade,
@@ -74,6 +82,8 @@ export async function findAccountByUsername(pool, username) {
         a.name,
         a.password_hash as "passwordHash",
         a.is_active as "isActive",
+        a.totp_secret as "totpSecret",
+        a.totp_enabled_at as "totpEnabledAt",
         coalesce(
           array_agg(aa.app_id order by aa.app_id)
             filter (where aa.app_id is not null),
@@ -89,6 +99,7 @@ export async function findAccountByUsername(pool, username) {
 
   const account = result.rows[0];
   if (!account || !account.isActive) return null;
+  account.totpEnabled = Boolean(account.totpSecret && account.totpEnabledAt);
   return account;
 }
 
@@ -98,6 +109,7 @@ export async function listAccounts(pool) {
       a.username,
       a.name,
       a.is_active as "isActive",
+      a.totp_enabled_at as "totpEnabledAt",
       a.created_at as "createdAt",
       a.updated_at as "updatedAt",
       a.last_login_at as "lastLoginAt",
@@ -113,6 +125,34 @@ export async function listAccounts(pool) {
   `);
 
   return result.rows;
+}
+
+export async function setAccountTotpSecret(pool, username, secret) {
+  const result = await pool.query(
+    `
+      update app_accounts
+      set totp_secret = $2, totp_enabled_at = now(), updated_at = now()
+      where username = $1 and is_active = true
+      returning id, username, name, is_active as "isActive", totp_enabled_at as "totpEnabledAt";
+    `,
+    [normalizeUsername(username), String(secret || "").trim()]
+  );
+
+  return result.rows[0] || null;
+}
+
+export async function clearAccountTotpSecret(pool, username) {
+  const result = await pool.query(
+    `
+      update app_accounts
+      set totp_secret = null, totp_enabled_at = null, updated_at = now()
+      where username = $1
+      returning username, name, is_active as "isActive";
+    `,
+    [normalizeUsername(username)]
+  );
+
+  return result.rows[0] || null;
 }
 
 export async function upsertAccount(pool, { username, name, passwordHash, apps = [], isActive = true }) {

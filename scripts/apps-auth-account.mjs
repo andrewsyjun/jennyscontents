@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  clearAccountTotpSecret,
   createPasswordResetToken,
   createPoolFromEnv,
   ensureAppsAuthSchema,
@@ -37,6 +38,7 @@ try {
           row.username,
           row.name,
           row.isActive ? "active" : "disabled",
+          row.totpEnabledAt ? "2fa" : "no-2fa",
           Array.isArray(row.apps) ? row.apps.join(",") : "",
           row.lastLoginAt ? new Date(row.lastLoginAt).toISOString() : "never",
         ].join("\t")
@@ -84,6 +86,12 @@ try {
     const account = await setAccountActive(pool, username, command === "enable");
     if (!account) throw new Error(`account not found: ${username}`);
     console.log(`${account.username} ${account.isActive ? "enabled" : "disabled"}`);
+  } else if (command === "disable-2fa" || command === "reset-2fa") {
+    const username = args.username;
+    if (!username) throw new Error(`${command} requires --username`);
+    const account = await clearAccountTotpSecret(pool, username);
+    if (!account) throw new Error(`account not found: ${username}`);
+    console.log(`disabled 2fa for ${account.username}`);
   } else {
     printUsage();
   }
@@ -130,5 +138,6 @@ function printUsage() {
   npm run apps:account -- set-password --username jenny --password "new-password"
   npm run apps:account -- reset-link --username jenny --expires-hours 24
   npm run apps:account -- disable --username jenny
-  npm run apps:account -- enable --username jenny`);
+  npm run apps:account -- enable --username jenny
+  npm run apps:account -- disable-2fa --username jenny`);
 }
