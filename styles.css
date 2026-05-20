@@ -68,6 +68,14 @@ textarea {
   min-height: 38px;
 }
 
+.utility-links {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .app-nav {
   display: inline-grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1823,6 +1831,14 @@ pre {
 
   .app-nav {
     width: 100%;
+  }
+
+  .utility-links {
+    width: 100%;
+  }
+
+  .utility-links .button {
+    flex: 1;
   }
 
   .section-actions,

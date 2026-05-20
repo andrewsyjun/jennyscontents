@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Jenny's Contents</title>
-    <link rel="stylesheet" href="./styles.css?v=20260520-logout" />
+    <link rel="stylesheet" href="./styles.css?v=20260520-appnav" />
   </head>
   <body>
     <header class="app-header">
@@ -17,7 +17,10 @@
         <button class="nav-tab" data-page-link="library" type="button">Saved</button>
         <button class="nav-tab" data-page-link="data" type="button">Sources</button>
       </nav>
-      <a class="button ghost utility-action" href="/logout">Sign out</a>
+      <div class="utility-links" aria-label="Account and app navigation">
+        <a class="button ghost utility-action" href="/">Apps home</a>
+        <a class="button ghost utility-action" href="/logout">Sign out</a>
+      </div>
     </header>
 
     <main class="workspace">
@@ -418,6 +421,6 @@
       </article>
     </template>
 
-    <script src="./app.js?v=20260520-logout" defer></script>
+    <script src="./app.js?v=20260520-appnav" defer></script>
   </body>
 </html>
