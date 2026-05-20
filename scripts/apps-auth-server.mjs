@@ -4,14 +4,18 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  consumePasswordResetToken,
   countAccounts,
   createPoolFromEnv,
   ensureAppsAuthSchema,
   findAccountByUsername,
+  findPasswordResetToken,
+  hashPassword,
   loadEnv,
   normalizeUsername,
   recordLoginEvent,
   timingSafeEqual,
+  updateAccountPassword,
   verifyPassword,
 } from "./apps-auth-db.mjs";
 
@@ -77,6 +81,34 @@ async function routeRequest(request, response) {
         await handleLoginPost(request, response, await readBody(request));
       } catch (error) {
         renderLogin(response, { error: error.message, next: safeNextPath(url.searchParams.get("next")) });
+      }
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/reset-password") {
+      await handleResetPasswordGet(response, url);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/reset-password") {
+      try {
+        await handleResetPasswordPost(response, await readBody(request));
+      } catch (error) {
+        renderResetPassword(response, { error: error.message });
+      }
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/account/password") {
+      await handleChangePasswordGet(request, response);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/account/password") {
+      try {
+        await handleChangePasswordPost(request, response, await readBody(request));
+      } catch (error) {
+        renderChangePassword(response, { error: error.message });
       }
       return;
     }
@@ -207,6 +239,7 @@ async function handleLauncher(request, response) {
           </div>
           <div class="session-chip">
             <span>${escapeHtml(session.name || session.username)}</span>
+            <a href="/account/password">Password</a>
             <a href="/logout">Sign out</a>
           </div>
         </header>
@@ -246,6 +279,202 @@ function renderLogin(response, { username = "", next = "/", error = "", notice =
             </label>
             <button type="submit">Sign in</button>
           </form>
+          <p class="form-footnote"><a href="/reset-password">Set or reset password</a></p>
+        </section>
+      </main>`,
+    })
+  );
+}
+
+async function handleResetPasswordGet(response, url) {
+  const token = String(url.searchParams.get("token") || "");
+  if (!databasePool) {
+    renderResetPassword(response, {
+      error: "Password reset links are not available in file-backed auth mode.",
+    });
+    return;
+  }
+
+  if (!token) {
+    renderResetPassword(response, {
+      notice: "Ask an administrator for a password reset link.",
+    });
+    return;
+  }
+
+  const reset = await findPasswordResetToken(databasePool, token);
+  if (!reset) {
+    renderResetPassword(response, {
+      error: "This reset link is invalid, expired, or already used.",
+    });
+    return;
+  }
+
+  renderResetPassword(response, {
+    token,
+    username: reset.username,
+  });
+}
+
+async function handleResetPasswordPost(response, body) {
+  if (!databasePool) throw new Error("Password reset links are not available in file-backed auth mode.");
+
+  const params = new URLSearchParams(body);
+  const token = String(params.get("token") || "");
+  const password = String(params.get("password") || "");
+  const confirmPassword = String(params.get("confirmPassword") || "");
+
+  try {
+    validateNewPassword(password, confirmPassword);
+  } catch (error) {
+    renderResetPassword(response, {
+      token,
+      error: error.message,
+    });
+    return;
+  }
+
+  const account = await consumePasswordResetToken(databasePool, token, hashPassword(password));
+  if (!account) {
+    renderResetPassword(response, {
+      error: "This reset link is invalid, expired, or already used.",
+    });
+    return;
+  }
+
+  renderResetPassword(response, {
+    done: true,
+    username: account.username,
+    notice: "Password saved. You can sign in now.",
+  });
+}
+
+function renderResetPassword(response, { token = "", username = "", error = "", notice = "", done = false } = {}) {
+  const message = error
+    ? `<p class="form-message error">${escapeHtml(error)}</p>`
+    : notice
+      ? `<p class="form-message">${escapeHtml(notice)}</p>`
+      : "";
+
+  const body = done
+    ? `<main class="login-shell">
+        <section class="login-card">
+          <p class="eyebrow">Jenny Apps</p>
+          <h1>Password saved</h1>
+          ${message}
+          <p class="login-copy">${escapeHtml(username)} is ready to use.</p>
+          <p class="form-footnote"><a href="/login">Return to sign in</a></p>
+        </section>
+      </main>`
+    : `<main class="login-shell">
+        <section class="login-card">
+          <p class="eyebrow">Jenny Apps</p>
+          <h1>Set password</h1>
+          <p class="login-copy">${username ? `Choose a password for ${escapeHtml(username)}.` : "Use the reset link from your administrator."}</p>
+          ${message}
+          ${token ? `<form method="post" action="/reset-password">
+            <input type="hidden" name="token" value="${escapeHtml(token)}" />
+            <label>
+              New password
+              <input name="password" type="password" autocomplete="new-password" autofocus />
+            </label>
+            <label>
+              Confirm password
+              <input name="confirmPassword" type="password" autocomplete="new-password" />
+            </label>
+            <button type="submit">Save password</button>
+          </form>` : ""}
+          <p class="form-footnote"><a href="/login">Return to sign in</a></p>
+        </section>
+      </main>`;
+
+  send(response, 200, pageShell({ title: "Set Password", body }));
+}
+
+async function handleChangePasswordGet(request, response) {
+  const session = await readSession(request);
+  if (!session) {
+    redirect(response, "/login?next=/account/password");
+    return;
+  }
+
+  renderChangePassword(response, { username: session.username });
+}
+
+async function handleChangePasswordPost(request, response, body) {
+  if (!databasePool) throw new Error("Password changes are not available in file-backed auth mode.");
+
+  const session = await readSession(request);
+  if (!session) {
+    redirect(response, "/login?next=/account/password");
+    return;
+  }
+
+  const params = new URLSearchParams(body);
+  const currentPassword = String(params.get("currentPassword") || "");
+  const password = String(params.get("password") || "");
+  const confirmPassword = String(params.get("confirmPassword") || "");
+  const user = await findConfiguredUser(session.username);
+
+  if (!user || !verifyPassword(currentPassword, user.passwordHash)) {
+    renderChangePassword(response, {
+      username: session.username,
+      error: "The current password was not recognized.",
+    });
+    return;
+  }
+
+  try {
+    validateNewPassword(password, confirmPassword);
+  } catch (error) {
+    renderChangePassword(response, {
+      username: session.username,
+      error: error.message,
+    });
+    return;
+  }
+
+  await updateAccountPassword(databasePool, session.username, hashPassword(password));
+  renderChangePassword(response, {
+    username: session.username,
+    notice: "Password updated.",
+  });
+}
+
+function renderChangePassword(response, { username = "", error = "", notice = "" } = {}) {
+  const message = error
+    ? `<p class="form-message error">${escapeHtml(error)}</p>`
+    : notice
+      ? `<p class="form-message">${escapeHtml(notice)}</p>`
+      : "";
+
+  send(
+    response,
+    200,
+    pageShell({
+      title: "Change Password",
+      body: `<main class="login-shell">
+        <section class="login-card">
+          <p class="eyebrow">Jenny Apps</p>
+          <h1>Change password</h1>
+          <p class="login-copy">${escapeHtml(username)}</p>
+          ${message}
+          <form method="post" action="/account/password">
+            <label>
+              Current password
+              <input name="currentPassword" type="password" autocomplete="current-password" autofocus />
+            </label>
+            <label>
+              New password
+              <input name="password" type="password" autocomplete="new-password" />
+            </label>
+            <label>
+              Confirm password
+              <input name="confirmPassword" type="password" autocomplete="new-password" />
+            </label>
+            <button type="submit">Update password</button>
+          </form>
+          <p class="form-footnote"><a href="/">Return to apps</a></p>
         </section>
       </main>`,
     })
@@ -355,6 +584,16 @@ function pageShell({ title, body }) {
         border-color: #d8aaa0;
         color: #8b2f24;
         background: #fff4f1;
+      }
+      .form-footnote {
+        margin: 16px 0 0;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      .form-footnote a {
+        color: var(--accent);
+        font-weight: 800;
+        text-decoration: none;
       }
       .launcher {
         width: min(1120px, calc(100% - 32px));
@@ -596,6 +835,16 @@ function safePathname(value) {
     return new URL(String(value || "/"), "https://apps.junresidential.com").pathname;
   } catch {
     return "/";
+  }
+}
+
+function validateNewPassword(password, confirmPassword) {
+  if (password.length < 12) {
+    throw new Error("Password must be at least 12 characters.");
+  }
+
+  if (password !== confirmPassword) {
+    throw new Error("Password confirmation does not match.");
   }
 }
 

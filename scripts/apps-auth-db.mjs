@@ -46,6 +46,17 @@ export async function ensureAppsAuthSchema(pool) {
 
     create index if not exists app_auth_login_events_username_created_at_idx
       on app_auth_login_events (username, created_at desc);
+
+    create table if not exists app_password_reset_tokens (
+      token_hash text primary key,
+      account_id bigint not null references app_accounts(id) on delete cascade,
+      expires_at timestamptz not null,
+      used_at timestamptz,
+      created_at timestamptz not null default now()
+    );
+
+    create index if not exists app_password_reset_tokens_account_id_created_at_idx
+      on app_password_reset_tokens (account_id, created_at desc);
   `);
 }
 
@@ -162,6 +173,120 @@ export async function setAccountActive(pool, username, isActive) {
   return result.rows[0] || null;
 }
 
+export async function updateAccountPassword(pool, username, passwordHash) {
+  const result = await pool.query(
+    `
+      update app_accounts
+      set password_hash = $2, updated_at = now()
+      where username = $1 and is_active = true
+      returning id, username, name, is_active as "isActive";
+    `,
+    [normalizeUsername(username), passwordHash]
+  );
+
+  return result.rows[0] || null;
+}
+
+export async function createPasswordResetToken(pool, username, { expiresHours = 24 } = {}) {
+  const account = await findAccountByUsername(pool, username);
+  if (!account) throw new Error(`active account not found: ${username}`);
+
+  const token = crypto.randomBytes(32).toString("base64url");
+  const tokenHash = resetTokenHash(token);
+  const hours = Math.max(1, Math.min(Number.parseInt(expiresHours, 10) || 24, 168));
+
+  await pool.query(
+    `
+      insert into app_password_reset_tokens (token_hash, account_id, expires_at)
+      values ($1, $2, now() + ($3::text || ' hours')::interval);
+    `,
+    [tokenHash, account.id, hours]
+  );
+
+  return {
+    token,
+    username: account.username,
+    name: account.name,
+    expiresHours: hours,
+  };
+}
+
+export async function findPasswordResetToken(pool, token) {
+  const result = await pool.query(
+    `
+      select
+        t.token_hash as "tokenHash",
+        t.expires_at as "expiresAt",
+        t.used_at as "usedAt",
+        a.id as "accountId",
+        a.username,
+        a.name,
+        a.is_active as "isActive"
+      from app_password_reset_tokens t
+      join app_accounts a on a.id = t.account_id
+      where t.token_hash = $1;
+    `,
+    [resetTokenHash(token)]
+  );
+
+  const row = result.rows[0];
+  if (!row || !row.isActive || row.usedAt || new Date(row.expiresAt).getTime() <= Date.now()) return null;
+  return row;
+}
+
+export async function consumePasswordResetToken(pool, token, passwordHash) {
+  const tokenHash = resetTokenHash(token);
+  const client = await pool.connect();
+
+  try {
+    await client.query("begin");
+    const tokenResult = await client.query(
+      `
+        select
+          t.token_hash,
+          t.account_id,
+          t.expires_at,
+          t.used_at,
+          a.username,
+          a.name,
+          a.is_active
+        from app_password_reset_tokens t
+        join app_accounts a on a.id = t.account_id
+        where t.token_hash = $1
+        for update;
+      `,
+      [tokenHash]
+    );
+
+    const row = tokenResult.rows[0];
+    if (!row || !row.is_active || row.used_at || new Date(row.expires_at).getTime() <= Date.now()) {
+      await client.query("rollback");
+      return null;
+    }
+
+    await client.query(
+      "update app_accounts set password_hash = $2, updated_at = now() where id = $1",
+      [row.account_id, passwordHash]
+    );
+    await client.query(
+      "update app_password_reset_tokens set used_at = now() where token_hash = $1",
+      [tokenHash]
+    );
+    await client.query("commit");
+
+    return {
+      id: row.account_id,
+      username: row.username,
+      name: row.name,
+    };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function recordLoginEvent(pool, { username, accountId = null, success, clientIp = "", userAgent = "" }) {
   await pool.query(
     `
@@ -202,6 +327,10 @@ export function timingSafeEqual(a, b) {
 
 export function normalizeUsername(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function resetTokenHash(token) {
+  return crypto.createHash("sha256").update(String(token || "")).digest("base64url");
 }
 
 export function loadEnv(file) {

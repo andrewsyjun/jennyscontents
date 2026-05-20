@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  createPasswordResetToken,
   createPoolFromEnv,
   ensureAppsAuthSchema,
   hashPassword,
@@ -8,6 +9,7 @@ import {
   loadEnv,
   setAccountActive,
   upsertAccount,
+  updateAccountPassword,
 } from "./apps-auth-db.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -56,6 +58,26 @@ try {
     });
 
     console.log(`saved ${account.username} (${account.apps.join(",") || "no apps"})`);
+  } else if (command === "set-password") {
+    const username = args.username;
+    const password = args.password || process.env.APPS_AUTH_ACCOUNT_PASSWORD || "";
+    if (!username || !password) {
+      throw new Error("set-password requires --username and --password or APPS_AUTH_ACCOUNT_PASSWORD");
+    }
+
+    const account = await updateAccountPassword(pool, username, hashPassword(password));
+    if (!account) throw new Error(`active account not found: ${username}`);
+    console.log(`updated password for ${account.username}`);
+  } else if (command === "reset-link") {
+    const username = args.username;
+    if (!username) throw new Error("reset-link requires --username");
+
+    const result = await createPasswordResetToken(pool, username, {
+      expiresHours: args["expires-hours"] || args.expiresHours || 24,
+    });
+    const baseUrl = String(args["base-url"] || process.env.APPS_AUTH_PUBLIC_URL || "https://apps.junresidential.com").replace(/\/+$/, "");
+    const link = `${baseUrl}/reset-password?token=${encodeURIComponent(result.token)}`;
+    console.log(`${result.username}\t${result.expiresHours}h\t${link}`);
   } else if (command === "disable" || command === "enable") {
     const username = args.username;
     if (!username) throw new Error(`${command} requires --username`);
@@ -105,6 +127,8 @@ function printUsage() {
   console.log(`Usage:
   npm run apps:account -- list
   npm run apps:account -- upsert --username jenny --name "Jenny Jun" --apps contents --password "temporary-password"
+  npm run apps:account -- set-password --username jenny --password "new-password"
+  npm run apps:account -- reset-link --username jenny --expires-hours 24
   npm run apps:account -- disable --username jenny
   npm run apps:account -- enable --username jenny`);
 }
