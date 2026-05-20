@@ -4154,29 +4154,6 @@ function attachActions() {
       markDirty();
     });
   });
-  document.querySelector("#resetDemo").addEventListener("click", () => {
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(TIKTOK_IMPORT_KEY);
-    localStorage.removeItem(SIGNAL_CACHE_KEY);
-    writeSavedIdeas([]);
-    writeVideoJobs([]);
-    videoStatusTimers.forEach((timer) => window.clearTimeout(timer));
-    videoStatusTimers.clear();
-    selectedVideoJobId = "";
-    latestExtractedIdea = null;
-    state = loadState();
-    setupStoredInputs();
-    renderFocusPlan();
-    renderPrompt();
-    renderIdeas();
-    renderPostSortControl();
-    renderExtractedIdea(null);
-    renderSavedIdeas();
-    renderVideoManager();
-    renderManagedData();
-    goToPage("today");
-    persist();
-  });
 }
 
 function setupReviewMode() {
