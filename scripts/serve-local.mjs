@@ -1072,7 +1072,7 @@ async function handleInstagramSummary(url) {
     account,
     sourceStatus,
     warnings,
-    media,
+    media: sortSignalMedia(media),
     analysis: analyzeMedia(media),
   };
 }
@@ -1584,8 +1584,9 @@ function normalizeXPost(post, author = {}) {
 
 function analyzeMedia(media) {
   const sorted = [...media].sort((a, b) => b.score - a.score);
-  const lastSevenDays = sorted.filter((item) => item.timestamp && daysAgo(item.timestamp) <= 7);
-  const totals = media.reduce(
+  const lastSevenDays = sorted.filter(isRecentSignalMedia);
+  const signalRows = lastSevenDays.length ? lastSevenDays : sorted;
+  const totals = signalRows.reduce(
     (sum, item) => ({
       views: sum.views + item.views,
       likes: sum.likes + item.likes,
@@ -1600,11 +1601,24 @@ function analyzeMedia(media) {
     totals,
     analyzedCount: sorted.length,
     recentCount: lastSevenDays.length,
-    topPosts: sorted.slice(0, 5),
-    hookPatterns: topCounts(sorted.map((item) => item.hookPattern)),
-    topicCategories: topCounts(sorted.map((item) => item.topicCategory)),
-    formatMix: topCounts(sorted.map((item) => item.format)),
+    topPosts: signalRows.slice(0, 5),
+    hookPatterns: topCounts(signalRows.map((item) => item.hookPattern)),
+    topicCategories: topCounts(signalRows.map((item) => item.topicCategory)),
+    formatMix: topCounts(signalRows.map((item) => item.format)),
   };
+}
+
+function sortSignalMedia(media) {
+  return [...media].sort((a, b) => {
+    const aRecent = isRecentSignalMedia(a);
+    const bRecent = isRecentSignalMedia(b);
+    if (aRecent !== bRecent) return aRecent ? -1 : 1;
+    return number(b.score) - number(a.score);
+  });
+}
+
+function isRecentSignalMedia(item) {
+  return Boolean(item?.timestamp) && daysAgo(item.timestamp) <= 7;
 }
 
 function emptyAnalysis() {
@@ -2593,7 +2607,8 @@ Rules:
 
 function ideaGenerationContext(payload, options = {}) {
   const media = Array.isArray(payload.media) ? payload.media : [];
-  const sorted = [...media].sort((a, b) => number(b.score) - number(a.score));
+  const recent = media.filter(isRecentSignalMedia);
+  const sorted = [...(recent.length ? recent : media)].sort((a, b) => number(b.score) - number(a.score));
   const postLimit =
     options.postLimit || numberFromEnv("IDEA_GENERATION_POST_LIMIT", 8, 3, 20);
   const captionLimit =

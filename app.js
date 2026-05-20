@@ -1258,10 +1258,12 @@ function buildInstagramAnalysis(media) {
     const time = new Date(item.timestamp).valueOf();
     return Number.isFinite(time) && time >= cutoff;
   });
+  const signalRows = recent.length ? recent : sorted;
+
   return {
     analyzedCount: sorted.length,
     recentCount: recent.length,
-    totals: sorted.reduce(
+    totals: signalRows.reduce(
       (totals, item) => ({
         views: totals.views + Number(item.views || 0),
         likes: totals.likes + Number(item.likes || 0),
@@ -1271,10 +1273,10 @@ function buildInstagramAnalysis(media) {
       }),
       { views: 0, likes: 0, comments: 0, saves: 0, shares: 0 }
     ),
-    topPosts: sorted.slice(0, 5),
-    hookPatterns: topCounts(sorted.map((item) => item.hookPattern)),
-    topicCategories: topCounts(sorted.map((item) => item.topicCategory)),
-    formatMix: topCounts(sorted.map((item) => item.format)),
+    topPosts: signalRows.slice(0, 5),
+    hookPatterns: topCounts(signalRows.map((item) => item.hookPattern)),
+    topicCategories: topCounts(signalRows.map((item) => item.topicCategory)),
+    formatMix: topCounts(signalRows.map((item) => item.format)),
   };
 }
 
@@ -1319,7 +1321,7 @@ function renderInstagramRows(media) {
 
   media
     .slice()
-    .sort((a, b) => b.score - a.score)
+    .sort(compareSignalMedia)
     .forEach((item) => {
       const row = document.createElement("tr");
       row.append(
@@ -1334,6 +1336,18 @@ function renderInstagramRows(media) {
       );
       body.append(row);
     });
+}
+
+function compareSignalMedia(a, b) {
+  const aRecent = isRecentSignalMedia(a);
+  const bRecent = isRecentSignalMedia(b);
+  if (aRecent !== bRecent) return aRecent ? -1 : 1;
+  return Number(b.score || 0) - Number(a.score || 0);
+}
+
+function isRecentSignalMedia(item) {
+  const time = Date.parse(item?.timestamp || "");
+  return Number.isFinite(time) && Date.now() - time <= 7 * 24 * 60 * 60 * 1000;
 }
 
 function mediaPostCell(item) {
