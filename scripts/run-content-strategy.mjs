@@ -32,6 +32,7 @@ const sourceStatus = [];
 const records = [
   ...(await collectInstagram()),
   ...(await collectTikTok()),
+  ...(await collectX()),
   ...loadManualTrends(),
 ];
 
@@ -150,23 +151,35 @@ async function collectInstagramHashtags({ token, userId, authMode }) {
 
       const top = await getJson(topUrl, {}, `Instagram hashtag top_media ${tag}`);
       const items = Array.isArray(top.data) ? top.data : [];
-      sourceStatus.push(`Instagram #${tag}: ${items.length} top media item(s).`);
+      let kept = 0;
+      let dropped = 0;
 
       for (const item of items) {
-        rows.push(
-          normalizeRecord({
-            platform: "instagram",
-            source: "hashtag_top_media",
-            post_id: item.id,
-            url: item.permalink,
-            created_at: item.timestamp,
-            caption_or_text: item.caption || "",
-            format: instagramFormat(item),
-            likes: item.like_count || 0,
-            comments: item.comments_count || 0,
-            hashtag: tag,
-          })
-        );
+        const record = normalizeRecord({
+          platform: "instagram",
+          source: "hashtag_top_media",
+          post_id: item.id,
+          url: item.permalink,
+          created_at: item.timestamp,
+          caption_or_text: item.caption || "",
+          format: instagramFormat(item),
+          likes: item.like_count || 0,
+          comments: item.comments_count || 0,
+          hashtag: tag,
+        });
+
+        if (!isRelevantInstagramRecord(record)) {
+          dropped += 1;
+          continue;
+        }
+
+        kept += 1;
+        rows.push(record);
+      }
+
+      sourceStatus.push(`Instagram #${tag}: ${kept}/${items.length} real estate top media item(s) kept.`);
+      if (dropped) {
+        sourceStatus.push(`Instagram #${tag}: ${dropped} unrelated top media item(s) filtered out.`);
       }
     } catch (error) {
       warnings.push(`Instagram hashtag #${tag} failed: ${error.message}`);
@@ -246,6 +259,74 @@ async function collectTikTok() {
     );
   } catch (error) {
     warnings.push(`TikTok owned videos failed: ${error.message}`);
+    return [];
+  }
+}
+
+async function collectX() {
+  const token = process.env.X_BEARER_TOKEN;
+  if (!token) {
+    sourceStatus.push("X skipped: X_BEARER_TOKEN is not configured.");
+    return [];
+  }
+
+  try {
+    const query =
+      process.env.X_RECENT_SEARCH_QUERY ||
+      '("real estate" OR realtor OR homebuyer OR homeseller) lang:en -is:retweet';
+    const searchUrl = new URL("https://api.x.com/2/tweets/search/recent");
+    searchUrl.searchParams.set("query", query);
+    searchUrl.searchParams.set("max_results", String(numberFromEnv("X_RECENT_SEARCH_MAX_RESULTS", 10, 10, 100)));
+    searchUrl.searchParams.set("sort_order", "relevancy");
+    searchUrl.searchParams.set("tweet.fields", "author_id,created_at,public_metrics,text");
+    searchUrl.searchParams.set("expansions", "author_id");
+    searchUrl.searchParams.set("user.fields", "username,name");
+
+    const payload = await getJson(
+      searchUrl,
+      {
+        Authorization: `Bearer ${token}`,
+      },
+      "X recent search"
+    );
+
+    const users = new Map((payload.includes?.users || []).map((user) => [user.id, user]));
+    const posts = payload.data || [];
+    const rows = [];
+    let dropped = 0;
+
+    for (const post of posts) {
+      const author = users.get(post.author_id) || {};
+      const metrics = post.public_metrics || {};
+      const record = normalizeRecord({
+        platform: "x",
+        source: "x_recent_search",
+        post_id: post.id,
+        url: author.username ? `https://x.com/${author.username}/status/${post.id}` : `https://x.com/i/web/status/${post.id}`,
+        created_at: post.created_at,
+        caption_or_text: post.text || "",
+        format: "post",
+        views: metrics.impression_count || 0,
+        likes: metrics.like_count || 0,
+        comments: metrics.reply_count || 0,
+        shares: (metrics.retweet_count || 0) + (metrics.quote_count || 0),
+      });
+
+      if (!isRelevantInstagramRecord(record)) {
+        dropped += 1;
+        continue;
+      }
+
+      rows.push(record);
+    }
+
+    sourceStatus.push(`X recent search: ${rows.length}/${posts.length} real estate post(s) kept.`);
+    if (dropped) {
+      sourceStatus.push(`X recent search: ${dropped} unrelated post(s) filtered out.`);
+    }
+    return rows;
+  } catch (error) {
+    warnings.push(`X recent search failed: ${error.message}`);
     return [];
   }
 }
@@ -522,6 +603,45 @@ function inferTopicCategory(record) {
     return "property tour";
   }
   return "buyer education";
+}
+
+function isRelevantInstagramRecord(record) {
+  if (["owned_media", "owned_video"].includes(record.source)) return true;
+
+  const caption = String(record.caption_or_text || "");
+  const body = caption.replace(/#[a-z0-9_]+/gi, " ").toLowerCase();
+  const fullText = caption.toLowerCase();
+
+  if (!isMostlyLatinText(caption)) return false;
+  if (/\b(giveaway|hockey|donald trump|breaking news|tcas|university admissions?)\b/.test(body)) {
+    return false;
+  }
+
+  const strongRealEstate =
+    /\b(real estate|realtor|realty|broker|agent|mls|homebuyer|home buyer|homeseller|home seller|mortgage|lender|loan|down payment|closing cost|escrow|appraisal|inspection|property tax|hoa)\b/.test(
+      body
+    );
+  const propertySignal =
+    /\b(home|homes|house|houses|property|properties|condo|condos|townhome|townhomes|townhouse|townhouses|listing|listings|listed|sold|lease|rental|rent|kitchen|bedroom|bathroom|garage|backyard|floor plan|renovation|development opportunity|new construction)\b/.test(
+      body
+    );
+  const transactionSignal =
+    /\b(buy|buyer|buyers|sell|seller|sellers|offer|showing|showings|house hunting|open house|move-in|neighborhood|suburb|relocat|inventory|price cut|days on market|rate|rates|afford|budget)\b/.test(
+      body
+    );
+  const localSignal =
+    /\b(dfw|dallas|north dallas|plano|frisco|mckinney|allen|prosper|celina|richardson|addison|carrollton|collin county|denton county|tarrant county)\b/.test(
+      fullText
+    );
+
+  return strongRealEstate || (propertySignal && (transactionSignal || localSignal));
+}
+
+function isMostlyLatinText(value) {
+  const letters = String(value || "").match(/\p{L}/gu) || [];
+  if (letters.length < 20) return true;
+  const latinLetters = String(value || "").match(/[A-Za-z]/g) || [];
+  return latinLetters.length / letters.length >= 0.65;
 }
 
 async function maybeUploadToDrive(filePath, content) {

@@ -4,33 +4,34 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Jenny's Contents</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260520-external-video-upload" />
   </head>
   <body>
     <header class="app-header">
       <div>
         <p class="eyebrow">Jenny's Contents</p>
-        <h1>Daily content command center</h1>
+        <h1>Content planner</h1>
       </div>
-      <div class="header-actions">
-        <a class="button ghost" href="./privacy.html">Privacy</a>
-        <a class="button ghost" href="./data-deletion.html">Data deletion</a>
-        <button class="button ghost" id="resetDemo" type="button">Reset</button>
-        <button class="button primary" id="copyStrategy" type="button">Copy brief</button>
-      </div>
+      <nav class="app-nav" aria-label="Workspace pages">
+        <button class="nav-tab is-active" data-page-link="today" type="button">Today</button>
+        <button class="nav-tab" data-page-link="library" type="button">Saved</button>
+        <button class="nav-tab" data-page-link="data" type="button">Sources</button>
+      </nav>
+      <button class="button ghost utility-action" id="resetDemo" type="button">Start over</button>
     </header>
 
     <main class="workspace">
-      <section class="panel brand-panel" aria-labelledby="brand-heading">
+      <section class="panel input-panel" data-page="today" aria-labelledby="input-heading">
         <div class="section-heading">
           <div>
             <p class="eyebrow">Setup</p>
-            <h2 id="brand-heading">Brand foundation</h2>
+            <h2 id="input-heading">Brand and audience</h2>
+            <p class="section-note">These are Jenny's positioning inputs. Posts inform the ideas, not the brand.</p>
           </div>
           <output class="save-state" id="saveState">Saved locally</output>
         </div>
 
-        <div class="form-grid">
+        <div class="form-grid compact-form">
           <label>
             Display name
             <input data-store="displayName" value="Jun Residential Group" />
@@ -46,6 +47,19 @@
           <label>
             Primary CTA
             <input data-store="primaryCta" value="DM me 'DFW' for the North Dallas guide" />
+          </label>
+          <label>
+            Today's filming focus
+            <select data-store="focus">
+              <option>3 reels I can film in under 45 minutes</option>
+              <option>1 carousel, 1 talking-head reel, 1 b-roll reel</option>
+              <option>seller-focused ideas only</option>
+              <option>buyer-focused ideas only</option>
+            </select>
+          </label>
+          <label class="analytics-field">
+            My 30-day analytics
+            <textarea data-store="analytics" placeholder="Paste reach, saves, shares, comments, follower growth, post links, and notes here."></textarea>
           </label>
         </div>
 
@@ -69,62 +83,59 @@
         </div>
       </section>
 
-      <section class="panel account-panel" aria-labelledby="accounts-heading">
+      <section class="panel data-panel" data-page="today" aria-labelledby="instagram-data-heading">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">Accounts</p>
-            <h2 id="accounts-heading">Launch checklist</h2>
-          </div>
-          <span class="progress" id="setupProgress">0%</span>
-        </div>
-
-        <div class="account-grid" id="accountGrid"></div>
-      </section>
-
-      <section class="panel data-panel" aria-labelledby="instagram-data-heading">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Signals</p>
-            <h2 id="instagram-data-heading">Instagram data</h2>
+            <p class="eyebrow">Step 1</p>
+            <h2 id="instagram-data-heading">Real estate posts</h2>
           </div>
           <div class="section-actions">
-            <a class="button secondary" id="facebookConnect" href="/auth/facebook/start">Connect Facebook Login</a>
-            <button class="button secondary" id="refreshInstagram" type="button">Refresh Instagram</button>
+            <div class="segmented-control" aria-label="Post source">
+              <button class="segment is-active" data-signal-source="instagram" type="button">Instagram</button>
+              <button class="segment" data-signal-source="tiktok" type="button">TikTok</button>
+              <button class="segment" data-signal-source="x" type="button">X</button>
+            </div>
+            <button class="button secondary" id="importTikTokPosts" type="button" hidden>Add TikTok posts</button>
+            <a class="button secondary" id="facebookConnect" href="/auth/facebook/start">Connect Instagram</a>
           </div>
         </div>
 
         <div class="data-status" id="instagramStatus">Waiting for refresh</div>
+        <div class="workflow-actions" aria-label="Post workflow">
+          <button class="button primary" id="refreshInstagram" type="button">Refresh posts</button>
+          <button class="button secondary" id="generateIdeas" type="button">Create filming ideas</button>
+        </div>
 
         <div class="metric-grid" id="instagramMetrics">
           <article>
-            <span>Account</span>
+            <span id="signalAccountLabel">Instagram</span>
             <strong id="instagramAccount">Not loaded</strong>
           </article>
           <article>
-            <span>Recent posts</span>
+            <span id="signalCountLabel">7-day matches</span>
             <strong id="instagramRecentCount">0</strong>
           </article>
           <article>
-            <span>Total reach/views</span>
+            <span id="signalReachLabel">Public engagement</span>
             <strong id="instagramViews">0</strong>
           </article>
           <article>
-            <span>Saves + shares</span>
+            <span id="signalShareLabel">Saves + shares</span>
             <strong id="instagramSavesShares">0</strong>
           </article>
         </div>
 
         <div class="signal-grid">
           <article class="signal-card">
-            <h3>Hook patterns</h3>
+            <h3>Opening styles</h3>
             <ul id="instagramHookPatterns"></ul>
           </article>
           <article class="signal-card">
-            <h3>Topic categories</h3>
+            <h3>Topics</h3>
             <ul id="instagramTopics"></ul>
           </article>
           <article class="signal-card">
-            <h3>Format mix</h3>
+            <h3>Formats</h3>
             <ul id="instagramFormats"></ul>
           </article>
         </div>
@@ -147,79 +158,230 @@
           </table>
         </div>
 
-        <div class="source-status" id="instagramSourceStatus"></div>
+        <details class="source-details">
+          <summary>Connection details</summary>
+          <div class="source-status" id="instagramSourceStatus"></div>
+        </details>
       </section>
 
-      <section class="panel strategy-panel" aria-labelledby="strategy-heading">
+      <section class="panel ideas-panel" data-page="today" aria-labelledby="ideas-heading">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">Morning run</p>
-            <h2 id="strategy-heading">Content strategy prompt</h2>
-          </div>
-          <button class="button secondary" id="downloadBrief" type="button">Download .md</button>
-        </div>
-
-        <div class="strategy-layout">
-          <div class="analytics-inputs">
-            <label>
-              Today's filming focus
-              <select data-store="focus">
-                <option>3 reels I can film in under 45 minutes</option>
-                <option>1 carousel, 1 talking-head reel, 1 b-roll reel</option>
-                <option>seller-focused ideas only</option>
-                <option>buyer-focused ideas only</option>
-              </select>
-            </label>
-            <label>
-              Paste 30-day analytics
-              <textarea data-store="analytics" placeholder="Paste reach, saves, shares, comments, follower growth, post links, and notes here."></textarea>
-            </label>
-          </div>
-
-          <article class="brief-preview">
-            <div class="preview-header">
-              <h3>Generated brief</h3>
-              <button class="button compact" id="copyPrompt" type="button">Copy prompt</button>
-            </div>
-            <pre id="promptPreview"></pre>
-          </article>
-        </div>
-      </section>
-
-      <section class="panel ideas-panel" aria-labelledby="ideas-heading">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Today</p>
+            <p class="eyebrow">Step 2</p>
             <h2 id="ideas-heading">Three filming ideas</h2>
+            <p class="section-note" id="ideasFocusNote">Choose a filming focus, then create ideas from the refreshed posts.</p>
           </div>
-          <button class="button secondary" id="seedIdeas" type="button">Load starter ideas</button>
+          <div class="section-actions">
+            <button class="button primary" id="saveBrief" type="button">Save today's brief</button>
+            <output class="action-status" id="briefSaveStatus" aria-live="polite" hidden></output>
+            <button class="button secondary" id="downloadBrief" type="button">Download .md</button>
+            <button class="button secondary" id="copyStrategy" type="button">Copy brief</button>
+            <button class="button secondary" id="togglePrompt" type="button" aria-expanded="false">Show prompt</button>
+          </div>
         </div>
+
+        <article class="extracted-idea" id="extractedIdeaPanel" hidden>
+          <div class="idea-example-header">
+            <div>
+              <p class="eyebrow">Best idea from posts</p>
+              <h3 id="extractedIdeaTitle">Filming idea</h3>
+            </div>
+            <button class="button secondary" id="useExtractedIdea" type="button">Use today</button>
+          </div>
+          <div class="idea-example-grid">
+            <section>
+              <span>Hook</span>
+              <p id="extractedIdeaHook"></p>
+            </section>
+            <section>
+              <span>Format</span>
+              <p id="extractedIdeaFormat"></p>
+            </section>
+            <section>
+              <span>Caption draft</span>
+              <p id="extractedIdeaCaption"></p>
+            </section>
+            <section>
+              <span>CTA</span>
+              <p id="extractedIdeaCta"></p>
+            </section>
+          </div>
+          <div class="video-prompt-block">
+            <div class="video-prompt-header">
+              <h4>Video prompt</h4>
+              <div class="video-prompt-actions">
+                <button class="button compact" id="copyVideoPrompt" type="button">Copy video prompt</button>
+                <output class="copy-status" id="videoPromptCopyStatus" aria-live="polite">Ready to copy</output>
+              </div>
+            </div>
+            <textarea id="extractedVideoPrompt" readonly></textarea>
+            <div class="generated-video-panel" id="generatedVideoPanel">
+              <video id="generatedVideo" controls hidden></video>
+              <p id="generatedVideoStatus">No generated video yet</p>
+            </div>
+          </div>
+          <p class="idea-basis" id="extractedIdeaBasis"></p>
+        </article>
 
         <div class="idea-grid" id="ideaGrid"></div>
+
+        <article class="brief-preview" id="promptPanel" hidden>
+          <div class="preview-header">
+            <h3>Full brief prompt</h3>
+            <button class="button compact" id="copyPrompt" type="button">Copy prompt</button>
+          </div>
+          <pre id="promptPreview"></pre>
+        </article>
+      </section>
+
+      <section class="panel library-panel" data-page="library" hidden aria-labelledby="library-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Saved</p>
+            <h2 id="library-heading">Saved content</h2>
+          </div>
+          <div class="section-actions">
+            <output class="save-state" id="libraryStatus">Duplicates are cleaned automatically</output>
+            <button class="button secondary" data-page-link="today" type="button">Back to today</button>
+          </div>
+        </div>
+
+        <article class="saved-ideas-panel">
+          <div class="saved-ideas-header">
+            <h3 id="savedIdeasTitle">Saved ideas</h3>
+            <div class="saved-idea-actions">
+              <button class="button compact" id="cleanSavedIdeas" type="button">Remove duplicates</button>
+              <button class="button compact" id="clearSavedIdeas" type="button">Clear all</button>
+            </div>
+          </div>
+          <div class="saved-ideas-list" id="savedIdeasList"></div>
+        </article>
+
+        <article class="video-manager-panel" aria-labelledby="video-manager-heading" hidden>
+          <div class="video-manager-header">
+            <div>
+              <p class="eyebrow">AI videos</p>
+              <h3 id="video-manager-heading">Video drafts</h3>
+            </div>
+            <div class="video-manager-actions">
+              <button class="button compact" id="saveVideoPrompt" type="button">Save prompt</button>
+              <button class="button compact" id="createVideoFromIdea" type="button">Create in app</button>
+              <button class="button compact" id="cleanVideoJobs" type="button">Remove duplicates</button>
+              <button class="button compact" id="clearVideoJobs" type="button">Clear all</button>
+            </div>
+          </div>
+          <div class="video-manager-layout">
+            <div class="video-job-list" id="videoJobList"></div>
+            <div class="video-preview-card">
+              <div class="preview-header">
+                <h4 id="selectedVideoTitle">Choose a video draft</h4>
+                <div class="preview-header-actions">
+                  <button class="button compact" id="uploadSelectedVideo" type="button">Upload video</button>
+                  <button class="button compact" id="copySelectedVideoPrompt" type="button">Copy prompt</button>
+                </div>
+              </div>
+              <video id="selectedVideoPlayer" controls hidden></video>
+              <p class="video-preview-status" id="selectedVideoStatus">Pick a draft or create one from today's idea.</p>
+              <p class="video-idea-link" id="selectedVideoIdeaLink"></p>
+              <textarea id="selectedVideoPrompt" readonly></textarea>
+            </div>
+          </div>
+          <input
+            id="videoUploadInput"
+            type="file"
+            accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov"
+            hidden
+          />
+          <output id="videoManagerStatus">Refresh saves one reusable video prompt. Create an AI video only when you are ready.</output>
+        </article>
+      </section>
+
+      <section class="panel managed-data-panel" data-page="data" hidden aria-labelledby="managed-data-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Sources</p>
+            <h2 id="managed-data-heading">Post sources</h2>
+          </div>
+          <button class="button secondary" data-page-link="today" type="button">Back to today</button>
+        </div>
+
+        <article class="import-panel" id="tiktokImportPanel">
+          <div class="import-header">
+            <h3>TikTok posts</h3>
+            <button class="button compact" id="closeTikTokImport" type="button">Back to today</button>
+          </div>
+          <div class="import-grid">
+            <label>
+              Paste posts
+              <textarea id="tiktokImportText" placeholder="url,caption,views,likes,comments,shares,date"></textarea>
+            </label>
+            <label>
+              Upload file
+              <input id="tiktokImportFile" type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" />
+            </label>
+          </div>
+          <div class="search-helper">
+            <div class="search-helper-header">
+              <h4>Search TikTok</h4>
+              <button class="button compact" id="loadTikTokTemplate" type="button">Use template</button>
+            </div>
+            <ol class="collection-steps">
+              <li>Open a search, choose a relevant post, and copy its share link.</li>
+              <li>Copy the opening hook or caption and visible metrics.</li>
+              <li>Return here, add the post, then repeat until you have 10-20 examples.</li>
+            </ol>
+            <div class="search-link-grid" id="tiktokSearchLinks"></div>
+          </div>
+          <div class="single-post-form" aria-label="Add one TikTok post">
+            <label>
+              Post URL
+              <input id="tiktokSingleUrl" placeholder="https://www.tiktok.com/@creator/video/..." />
+            </label>
+            <label class="single-caption">
+              Hook or caption
+              <textarea id="tiktokSingleCaption" placeholder="Paste the first line, hook, or caption"></textarea>
+            </label>
+            <label>
+              Views
+              <input id="tiktokSingleViews" inputmode="numeric" placeholder="12000" />
+            </label>
+            <label>
+              Likes
+              <input id="tiktokSingleLikes" inputmode="numeric" placeholder="740" />
+            </label>
+            <label>
+              Comments
+              <input id="tiktokSingleComments" inputmode="numeric" placeholder="65" />
+            </label>
+            <label>
+              Shares
+              <input id="tiktokSingleShares" inputmode="numeric" placeholder="120" />
+            </label>
+            <label>
+              Date
+              <input id="tiktokSingleDate" type="date" />
+            </label>
+            <button class="button secondary" id="addTikTokSinglePost" type="button">Add post</button>
+          </div>
+          <div class="import-actions">
+            <button class="button primary" id="saveTikTokImport" type="button">Import</button>
+            <button class="button ghost" id="clearTikTokImport" type="button">Clear imports</button>
+            <output id="tiktokImportStatus">No imported posts</output>
+          </div>
+        </article>
+
+        <article class="cache-panel" aria-labelledby="cache-heading">
+          <div class="cache-header">
+            <div>
+              <h3 id="cache-heading">Recent refreshes</h3>
+              <p>Recent post refreshes are saved in this browser so you can keep working if a platform slows down.</p>
+            </div>
+            <button class="button compact" id="clearSignalCache" type="button">Clear refreshes</button>
+          </div>
+          <div class="cache-list" id="signalCacheList"></div>
+        </article>
       </section>
     </main>
-
-    <template id="accountCardTemplate">
-      <article class="account-card">
-        <div class="account-title">
-          <div>
-            <p class="platform-label"></p>
-            <h3></h3>
-          </div>
-          <select class="status-select" aria-label="Account status">
-            <option>Not started</option>
-            <option>In progress</option>
-            <option>Live</option>
-          </select>
-        </div>
-        <label>
-          Handle
-          <input class="handle-input" />
-        </label>
-        <div class="link-row"></div>
-        <div class="task-list"></div>
-      </article>
-    </template>
 
     <template id="ideaTemplate">
       <article class="idea-card">
@@ -242,6 +404,6 @@
       </article>
     </template>
 
-    <script src="./app.js?v=20260512-ig-review" defer></script>
+    <script src="./app.js?v=20260520-external-video-upload" defer></script>
   </body>
 </html>
