@@ -2334,12 +2334,22 @@ function attachIdeaToVideoJob(job, savedIdea) {
 
 function cleanVideoJobsData() {
   const before = readVideoJobs();
-  const { rows, removed } = dedupeSimilarRows(before, areSimilarVideoJobs, preferredVideoJob);
+  const withCurrentIdeaDrafts = ensureVideoJobsForSavedIdeas(before);
+  const { rows, removed } = dedupeSimilarRows(withCurrentIdeaDrafts, areSimilarVideoJobs, preferredVideoJob);
   writeVideoJobs(sortVideoJobs(rows));
   if (!rows.some((row) => row.id === selectedVideoJobId)) {
     selectedVideoJobId = rows[0]?.id || "";
   }
   return { before: before.length, after: rows.length, removed };
+}
+
+function ensureVideoJobsForSavedIdeas(rows) {
+  return readSavedIdeas().reduce((nextRows, savedIdea) => {
+    if (!savedIdea?.id || nextRows.some((job) => job.ideaId && job.ideaId === savedIdea.id)) {
+      return nextRows;
+    }
+    return [videoJobFromIdea(savedIdea), ...nextRows];
+  }, rows.slice());
 }
 
 function videoJobFromIdea(savedIdea) {
