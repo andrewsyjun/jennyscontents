@@ -74,6 +74,16 @@ async function routeRequest(request, response) {
       return;
     }
 
+    if (request.method === "HEAD" && url.pathname === "/health") {
+      send(response, 200, "", "application/json; charset=utf-8", { "Cache-Control": "no-store" });
+      return;
+    }
+
+    if (request.method === "HEAD" && ["/", "/login", "/logout", "/reset-password"].includes(url.pathname)) {
+      send(response, 200, "", "text/html; charset=utf-8", { "Cache-Control": "no-store" });
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/auth/check") {
       await handleAuthCheck(request, response);
       return;
@@ -81,6 +91,11 @@ async function routeRequest(request, response) {
 
     if (request.method === "GET" && url.pathname === "/login") {
       await handleLoginGet(request, response, url);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/login/complete") {
+      await handleLoginComplete(request, response, url);
       return;
     }
 
@@ -266,7 +281,7 @@ async function handleLoginPost(request, response, body) {
     name: user.name || user.username,
     apps: user.apps || [],
   });
-  redirect(response, next || "/");
+  renderLoginComplete(response, { next });
 }
 
 async function handleMfaPost(request, response, params, mfaStage) {
@@ -276,10 +291,15 @@ async function handleMfaPost(request, response, params, mfaStage) {
   const next = safeNextPath(params.get("next") || state?.next);
   const code = normalizeTotpCode(params.get("totpCode"));
   const username = normalizeUsername(state?.username);
-  const key = `mfa:${clientIp(request)}:${username || "unknown"}`;
-  const attempt = checkLoginRate(key);
 
   if (!state || !username) {
+    const session = await readSession(request);
+    if (session) {
+      clearMfaCookie(response);
+      renderLoginComplete(response, { next });
+      return;
+    }
+
     clearMfaCookie(response);
     renderLogin(response, {
       next,
@@ -288,6 +308,8 @@ async function handleMfaPost(request, response, params, mfaStage) {
     return;
   }
 
+  const key = `mfa:${clientIp(request)}:${username}`;
+  const attempt = checkLoginRate(key);
   const user = await findConfiguredUser(username);
   if (!user) {
     clearMfaCookie(response);
@@ -347,7 +369,17 @@ async function handleMfaPost(request, response, params, mfaStage) {
     name: user.name || user.username,
     apps: user.apps || [],
   });
-  redirect(response, next || "/");
+  renderLoginComplete(response, { next });
+}
+
+async function handleLoginComplete(request, response, url) {
+  const next = safeNextPath(url.searchParams.get("next"));
+  if (!(await readSession(request))) {
+    redirect(response, `/login?next=${encodeURIComponent(next || "/")}`);
+    return;
+  }
+
+  renderLoginComplete(response, { next });
 }
 
 async function handleLauncher(request, response) {
@@ -495,6 +527,30 @@ function renderTotpChallenge(response, { username = "", next = "/", error = "" }
           </form>
           <p class="form-footnote"><a href="/logout">Cancel and sign out</a></p>
         </section>
+      </main>`,
+    })
+  );
+}
+
+function renderLoginComplete(response, { next = "/" } = {}) {
+  const safeNext = safeNextPath(next);
+
+  send(
+    response,
+    200,
+    pageShell({
+      title: "Opening Jenny Apps",
+      body: `<main class="login-shell">
+        <section class="login-card">
+          <p class="eyebrow">Jenny Apps</p>
+          <h1>Opening app</h1>
+          <p class="login-copy">Signed in. Opening your app now.</p>
+          <p class="form-footnote"><a data-login-complete-link href="${escapeHtml(safeNext)}">Continue</a></p>
+        </section>
+        <script>
+          const continueLink = document.querySelector("[data-login-complete-link]");
+          if (continueLink) window.location.replace(continueLink.href);
+        </script>
       </main>`,
     })
   );
@@ -849,6 +905,10 @@ function pageShell({ title, body }) {
         cursor: pointer;
       }
       button:hover { background: var(--accent-strong); }
+      button:disabled {
+        cursor: wait;
+        opacity: 0.72;
+      }
       .form-message {
         margin: 0 0 16px;
         border: 1px solid var(--line);
@@ -976,33 +1036,31 @@ function pageShell({ title, body }) {
       }
     </style>
   </head>
-  <body>${body}</body>
+  <body>${body}
+    <script>
+      document.addEventListener("submit", (event) => {
+        const button = event.target.querySelector("button[type='submit']");
+        if (!button || button.disabled) return;
+        button.disabled = true;
+        button.textContent = "Working...";
+      });
+    </script>
+  </body>
 </html>`;
 }
 
 async function readSession(request) {
-  const cookies = parseCookies(request.headers.cookie || "");
-  const raw = cookies[cookieName];
-  if (!raw) return null;
+  const payload = readSignedCookiePayload(request, cookieName);
+  if (!payload) return null;
 
-  const [payloadText, signature] = raw.split(".");
-  if (!payloadText || !signature) return null;
-  if (!timingSafeEqual(signature, sign(payloadText))) return null;
-
-  try {
-    const payload = JSON.parse(Buffer.from(payloadText, "base64url").toString("utf8"));
-    if (!payload.exp || Number(payload.exp) < Math.floor(Date.now() / 1000)) return null;
-    const user = await findConfiguredUser(payload.username);
-    if (!user) return null;
-    return {
-      ...payload,
-      username: user.username,
-      name: user.name || payload.name || user.username,
-      apps: user.apps || [],
-    };
-  } catch {
-    return null;
-  }
+  const user = await findConfiguredUser(payload.username);
+  if (!user) return null;
+  return {
+    ...payload,
+    username: user.username,
+    name: user.name || payload.name || user.username,
+    apps: user.apps || [],
+  };
 }
 
 function setSessionCookie(response, session) {
@@ -1020,29 +1078,18 @@ function setSessionCookie(response, session) {
 }
 
 function clearSessionCookie(response) {
-  appendSetCookie(response, `${cookieName}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
+  clearCookieVariants(response, cookieName);
 }
 
 function readMfaState(request) {
-  const cookies = parseCookies(request.headers.cookie || "");
-  const raw = cookies[mfaCookieName];
-  if (!raw) return null;
+  const payload = readSignedCookiePayload(request, mfaCookieName);
+  if (!payload) return null;
 
-  const [payloadText, signature] = raw.split(".");
-  if (!payloadText || !signature) return null;
-  if (!timingSafeEqual(signature, sign(payloadText))) return null;
-
-  try {
-    const payload = JSON.parse(Buffer.from(payloadText, "base64url").toString("utf8"));
-    if (!payload.exp || Number(payload.exp) < Math.floor(Date.now() / 1000)) return null;
-    return {
-      username: normalizeUsername(payload.username),
-      next: safeNextPath(payload.next),
-      setupSecret: String(payload.setupSecret || "").trim(),
-    };
-  } catch {
-    return null;
-  }
+  return {
+    username: normalizeUsername(payload.username),
+    next: safeNextPath(payload.next),
+    setupSecret: String(payload.setupSecret || "").trim(),
+  };
 }
 
 function setMfaCookie(response, state) {
@@ -1062,7 +1109,37 @@ function setMfaCookie(response, state) {
 }
 
 function clearMfaCookie(response) {
-  appendSetCookie(response, `${mfaCookieName}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
+  clearCookieVariants(response, mfaCookieName);
+}
+
+function readSignedCookiePayload(request, name) {
+  const payloads = parseCookieValues(request.headers.cookie || "", name)
+    .map(parseSignedCookiePayload)
+    .filter(Boolean)
+    .sort((first, second) => Number(second.iat || 0) - Number(first.iat || 0));
+
+  return payloads[0] || null;
+}
+
+function parseSignedCookiePayload(raw) {
+  const [payloadText, signature] = String(raw || "").split(".");
+  if (!payloadText || !signature) return null;
+  if (!timingSafeEqual(signature, sign(payloadText))) return null;
+
+  try {
+    const payload = JSON.parse(Buffer.from(payloadText, "base64url").toString("utf8"));
+    if (!payload.exp || Number(payload.exp) < Math.floor(Date.now() / 1000)) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function clearCookieVariants(response, name) {
+  const attributes = "Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax";
+  appendSetCookie(response, `${name}=; ${attributes}`);
+  appendSetCookie(response, `${name}=; Domain=apps.junresidential.com; ${attributes}`);
+  appendSetCookie(response, `${name}=; Domain=.junresidential.com; ${attributes}`);
 }
 
 function appendSetCookie(response, cookie) {
@@ -1378,14 +1455,16 @@ function validateNewPassword(password, confirmPassword) {
   }
 }
 
-function parseCookies(header) {
-  const cookies = {};
+function parseCookieValues(header, name) {
+  const values = [];
   for (const part of String(header || "").split(";")) {
     const index = part.indexOf("=");
     if (index === -1) continue;
-    cookies[part.slice(0, index).trim()] = part.slice(index + 1).trim();
+    if (part.slice(0, index).trim() === name) {
+      values.push(part.slice(index + 1).trim());
+    }
   }
-  return cookies;
+  return values;
 }
 
 async function readBody(request) {
