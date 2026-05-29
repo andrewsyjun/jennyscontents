@@ -14,6 +14,13 @@ const port = numberFromEnv("LOCAL_PORT", 4173, 1024, 65535);
 const host = process.env.LOCAL_HOST || "127.0.0.1";
 const graphVersion = process.env.META_GRAPH_VERSION || "v25.0";
 const apiFetchTimeoutMs = numberFromEnv("API_FETCH_TIMEOUT_MS", 15000, 1000, 60000);
+const dailyContentTimeZone = process.env.CONTENT_DAILY_TIME_ZONE || "America/Chicago";
+const dailyContentRefreshHour = numberFromEnv("CONTENT_DAILY_REFRESH_HOUR", 9, 0, 23);
+const dailyContentCacheFile = path.resolve(
+  root,
+  process.env.CONTENT_DAILY_CACHE_FILE ||
+    path.join(process.env.CONTENT_OUTPUT_DIR || "content-strategy", "daily-cache.json")
+);
 const tiktokOauthSessions = new Map();
 const xOauthSessions = new Map();
 
@@ -125,7 +132,7 @@ const server = http.createServer((request, response) => {
     }
 
     if (url.pathname === "/api/tiktok/summary") {
-      handleTikTokSummary()
+      handleTikTokSummary(url)
         .then((payload) => sendJson(response, 200, payload))
         .catch((error) =>
           sendJson(response, 500, {
@@ -138,7 +145,7 @@ const server = http.createServer((request, response) => {
     }
 
     if (url.pathname === "/api/x/summary") {
-      handleXSummary()
+      handleXSummary(url)
         .then((payload) => sendJson(response, 200, payload))
         .catch((error) =>
           sendJson(response, 500, {
@@ -1002,6 +1009,12 @@ function authResultPage({ title, status, details }) {
 }
 
 async function handleInstagramSummary(url) {
+  return getDailySignalSummary("instagram", () => buildInstagramSummary(url), {
+    force: isForceRefresh(url),
+  });
+}
+
+async function buildInstagramSummary(url) {
   const token = process.env.INSTAGRAM_ACCESS_TOKEN;
   const authMode = instagramAuthMode();
   const graphHost = authMode === "facebook_login" ? "graph.facebook.com" : "graph.instagram.com";
@@ -1077,7 +1090,13 @@ async function handleInstagramSummary(url) {
   };
 }
 
-async function handleTikTokSummary() {
+async function handleTikTokSummary(url) {
+  return getDailySignalSummary("tiktok", () => buildTikTokSummaryResponse(), {
+    force: isForceRefresh(url),
+  });
+}
+
+async function buildTikTokSummaryResponse() {
   let token = process.env.TIKTOK_ACCESS_TOKEN;
   const checkedAt = new Date().toISOString();
   const sourceStatus = [
@@ -1183,7 +1202,13 @@ function isTikTokTokenError(error) {
   return /access.?token|auth|credential|expired|invalid.?token|unauthorized/i.test(error.message || "");
 }
 
-async function handleXSummary() {
+async function handleXSummary(url) {
+  return getDailySignalSummary("x", () => buildXSummaryResponse(), {
+    force: isForceRefresh(url),
+  });
+}
+
+async function buildXSummaryResponse() {
   const oauthAccount = xOAuthAccountFromEnv();
   let token = process.env.X_BEARER_TOKEN || process.env.X_ACCESS_TOKEN;
   const checkedAt = new Date().toISOString();
@@ -1268,6 +1293,206 @@ function xOAuthAccountFromEnv() {
     username: process.env.X_USERNAME || "connected X account",
     authMode: "oauth2_user",
   };
+}
+
+function isForceRefresh(url) {
+  if (!url?.searchParams) return false;
+  const value = String(url.searchParams.get("refresh") || url.searchParams.get("force") || "").toLowerCase();
+  return value === "1" || value === "true" || value === "yes";
+}
+
+async function getDailySignalSummary(sourceId, buildPayload, { force = false } = {}) {
+  const dailyWindow = currentDailyContentWindow();
+  const cache = readDailyContentCache();
+  const currentEntry = cache.sources?.[sourceId];
+  const latestEntry = latestDailySourceEntry(cache, sourceId);
+
+  if (!force && currentEntry?.dayKey === dailyWindow.dayKey && currentEntry.payload) {
+    return withDailyCacheMetadata(currentEntry.payload, {
+      sourceId,
+      entry: currentEntry,
+      status: "daily_cached",
+      dailyWindow,
+    });
+  }
+
+  if (!force && dailyWindow.beforeRefresh && latestEntry?.payload) {
+    return withDailyCacheMetadata(latestEntry.payload, {
+      sourceId,
+      entry: latestEntry,
+      status: "previous_daily_cached",
+      dailyWindow,
+    });
+  }
+
+  if (!force && dailyWindow.beforeRefresh && !latestEntry?.payload) {
+    return {
+      ok: false,
+      configured: true,
+      checkedAt: new Date().toISOString(),
+      account: null,
+      message: `${sourceDisplayName(sourceId)} will refresh after ${dailyContentRefreshHour}:00 ${dailyContentTimeZone}.`,
+      sourceStatus: [
+        `Daily content retrieval is scheduled for ${dailyContentRefreshHour}:00 ${dailyContentTimeZone}.`,
+      ],
+      warnings: [],
+      media: [],
+      analysis: emptyAnalysis(),
+      cached: {
+        daily: true,
+        status: "waiting_for_daily_refresh",
+        dayKey: dailyWindow.dayKey,
+        refreshHour: dailyContentRefreshHour,
+        timeZone: dailyContentTimeZone,
+      },
+    };
+  }
+
+  try {
+    const payload = await buildPayload();
+    if (payload?.ok) {
+      const entry = {
+        dayKey: dailyWindow.dayKey,
+        generatedAt: new Date().toISOString(),
+        payload,
+      };
+      cache.sources = {
+        ...(cache.sources || {}),
+        [sourceId]: entry,
+      };
+      writeDailyContentCache(cache);
+      return withDailyCacheMetadata(payload, {
+        sourceId,
+        entry,
+        status: force ? "manual_refresh" : "daily_refreshed",
+        dailyWindow,
+      });
+    }
+    return payload;
+  } catch (error) {
+    if (latestEntry?.payload) {
+      return withDailyCacheMetadata({
+        ...latestEntry.payload,
+        ok: latestEntry.payload.ok !== false,
+        warnings: [
+          ...(latestEntry.payload.warnings || []),
+          `${sourceDisplayName(sourceId)} live refresh failed, so Mail Desk is showing the last daily cache: ${error.message}`,
+        ],
+      }, {
+        sourceId,
+        entry: latestEntry,
+        status: "stale_daily_cache",
+        dailyWindow,
+      });
+    }
+    throw error;
+  }
+}
+
+function withDailyCacheMetadata(payload, { sourceId, entry, status, dailyWindow }) {
+  return {
+    ...payload,
+    cached: {
+      ...(payload.cached || {}),
+      daily: true,
+      status,
+      sourceId,
+      dayKey: entry.dayKey,
+      savedAt: entry.generatedAt,
+      refreshHour: dailyContentRefreshHour,
+      timeZone: dailyContentTimeZone,
+      nextRefreshLabel: dailyWindow.nextRefreshLabel,
+    },
+    sourceStatus: [
+      `Daily content cache: ${dailyCacheStatusLabel(status)} for ${entry.dayKey}.`,
+      ...(payload.sourceStatus || []),
+    ],
+  };
+}
+
+function dailyCacheStatusLabel(status) {
+  if (status === "daily_refreshed") return `refreshed after ${dailyContentRefreshHour}:00 ${dailyContentTimeZone}`;
+  if (status === "manual_refresh") return "manually refreshed";
+  if (status === "previous_daily_cached") return `using the previous daily cache until ${dailyContentRefreshHour}:00 ${dailyContentTimeZone}`;
+  if (status === "stale_daily_cache") return "using the last daily cache because live refresh failed";
+  return "served from today's 9 AM cache";
+}
+
+function currentDailyContentWindow(now = new Date()) {
+  const parts = datePartsInTimeZone(now, dailyContentTimeZone);
+  const todayKey = `${parts.year}-${parts.month}-${parts.day}`;
+  const beforeRefresh = Number(parts.hour) < dailyContentRefreshHour;
+  const dayKey = beforeRefresh ? shiftDateKey(todayKey, -1) : todayKey;
+  return {
+    dayKey,
+    beforeRefresh,
+    localDateKey: todayKey,
+    nextRefreshLabel: `${beforeRefresh ? todayKey : shiftDateKey(todayKey, 1)} ${String(dailyContentRefreshHour).padStart(2, "0")}:00 ${dailyContentTimeZone}`,
+  };
+}
+
+function datePartsInTimeZone(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    year: values.year,
+    month: values.month,
+    day: values.day,
+    hour: values.hour,
+    minute: values.minute,
+  };
+}
+
+function shiftDateKey(dateKey, offsetDays) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + offsetDays, 12));
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function readDailyContentCache() {
+  try {
+    if (!fs.existsSync(dailyContentCacheFile)) {
+      return { version: 1, sources: {}, ideas: {} };
+    }
+    const parsed = JSON.parse(fs.readFileSync(dailyContentCacheFile, "utf8"));
+    return {
+      version: 1,
+      sources: parsed && typeof parsed.sources === "object" ? parsed.sources : {},
+      ideas: parsed && typeof parsed.ideas === "object" ? parsed.ideas : {},
+    };
+  } catch {
+    return { version: 1, sources: {}, ideas: {} };
+  }
+}
+
+function writeDailyContentCache(cache) {
+  fs.mkdirSync(path.dirname(dailyContentCacheFile), { recursive: true });
+  const tmpPath = `${dailyContentCacheFile}.${process.pid}.tmp`;
+  fs.writeFileSync(tmpPath, JSON.stringify(cache, null, 2));
+  fs.renameSync(tmpPath, dailyContentCacheFile);
+}
+
+function latestDailySourceEntry(cache, sourceId) {
+  const entry = cache.sources?.[sourceId];
+  return entry?.payload ? entry : null;
+}
+
+function sourceDisplayName(sourceId) {
+  if (sourceId === "tiktok") return "TikTok";
+  if (sourceId === "x") return "X";
+  return "Instagram";
 }
 
 function xConnectedUnavailableSummary({ checkedAt, sourceStatus, warnings, message, account }) {
@@ -2358,21 +2583,88 @@ function safeFileName(value) {
 async function handleIdeaGenerate(payload) {
   const apiKey = process.env.OPENAI_API_KEY;
   const checkedAt = new Date().toISOString();
+  const dailyWindow = currentDailyContentWindow();
+  const cache = readDailyContentCache();
+  const cacheKey = dailyIdeaCacheKey(payload);
+  const cachedIdea = cache.ideas?.[cacheKey];
+
+  if (!payload?.forceRefresh && cachedIdea?.dayKey === dailyWindow.dayKey && cachedIdea.payload) {
+    return withDailyIdeaCacheMetadata(cachedIdea.payload, {
+      entry: cachedIdea,
+      status: "daily_cached",
+      dailyWindow,
+    });
+  }
+
+  let result;
 
   if (apiKey) {
-    return generateIdeaWithOpenAIApi({ apiKey, checkedAt, payload });
+    result = await generateIdeaWithOpenAIApi({ apiKey, checkedAt, payload });
+  } else if (hasCodexChatGptAuth()) {
+    result = await generateIdeaWithCodexCli({ checkedAt, payload });
+  } else {
+    return {
+      ok: false,
+      configured: false,
+      checkedAt,
+      message:
+        "No AI credential is configured. Add OPENAI_API_KEY to .env or sign in with Codex so ~/.codex/auth.json is available.",
+    };
   }
 
-  if (hasCodexChatGptAuth()) {
-    return generateIdeaWithCodexCli({ checkedAt, payload });
+  if (result?.ok) {
+    const entry = {
+      dayKey: dailyWindow.dayKey,
+      generatedAt: checkedAt,
+      payload: result,
+    };
+    cache.ideas = {
+      ...(cache.ideas || {}),
+      [cacheKey]: entry,
+    };
+    writeDailyContentCache(cache);
+    return withDailyIdeaCacheMetadata(result, {
+      entry,
+      status: payload?.forceRefresh ? "manual_refresh" : "daily_refreshed",
+      dailyWindow,
+    });
   }
 
+  return result;
+}
+
+function dailyIdeaCacheKey(payload) {
+  const fingerprint = {
+    sourceId: payload?.sourceId || "instagram",
+    market: payload?.market || "",
+    audience: payload?.audience || "",
+    focus: payload?.focus || "",
+    primaryCta: payload?.primaryCta || "",
+    retrievedCount: Number(payload?.retrievedCount || 0),
+    recentCount: Number(payload?.recentCount || 0),
+    mediaIds: Array.isArray(payload?.media)
+      ? payload.media.slice(0, 16).map((item) => item.id || item.post_id || item.permalink || item.url || item.caption || "")
+      : [],
+    hookPatterns: payload?.hookPatterns || [],
+    topicCategories: payload?.topicCategories || [],
+    formatMix: payload?.formatMix || [],
+  };
+  return crypto.createHash("sha256").update(JSON.stringify(fingerprint)).digest("hex");
+}
+
+function withDailyIdeaCacheMetadata(payload, { entry, status, dailyWindow }) {
   return {
-    ok: false,
-    configured: false,
-    checkedAt,
-    message:
-      "No AI credential is configured. Add OPENAI_API_KEY to .env or sign in with Codex so ~/.codex/auth.json is available.",
+    ...payload,
+    cached: {
+      ...(payload.cached || {}),
+      daily: true,
+      status,
+      dayKey: entry.dayKey,
+      savedAt: entry.generatedAt,
+      refreshHour: dailyContentRefreshHour,
+      timeZone: dailyContentTimeZone,
+      nextRefreshLabel: dailyWindow.nextRefreshLabel,
+    },
   };
 }
 

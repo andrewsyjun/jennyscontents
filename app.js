@@ -300,7 +300,7 @@ async function loadInstagramData() {
   return loadSignalData(state.signalSource || "instagram");
 }
 
-async function loadSignalData(sourceId = "instagram") {
+async function loadSignalData(sourceId = "instagram", options = {}) {
   const source = signalSources[sourceId] || signalSources.instagram;
   const status = document.querySelector("#instagramStatus");
   const button = document.querySelector("#refreshInstagram");
@@ -310,7 +310,9 @@ async function loadSignalData(sourceId = "instagram") {
   renderSourceTools();
   renderMetricLabels(source);
   renderFocusPlan();
-  status.textContent = `Checking ${source.label} posts...`;
+  status.textContent = options.force
+    ? `Refreshing ${source.label} posts now...`
+    : `Loading today's ${source.label} content cache...`;
   if (!button.dataset.idleLabel || button.textContent !== "Refreshing...") {
     button.dataset.idleLabel = button.textContent || "Refresh posts";
   }
@@ -323,7 +325,11 @@ async function loadSignalData(sourceId = "instagram") {
       return;
     }
 
-    const response = await fetch(appPath(source.endpoint), { cache: "no-store" });
+    const endpointUrl = new URL(appPath(source.endpoint), window.location.origin);
+    if (options.force) {
+      endpointUrl.searchParams.set("refresh", "1");
+    }
+    const response = await fetch(endpointUrl.toString(), { cache: "no-store" });
     let payload = useCachedPayloadIfNeeded(sourceId, await response.json());
     payload = mergeImportedSignals(sourceId, payload);
     if (!response.ok || !payload.ok) {
@@ -374,6 +380,18 @@ function renderInstagramData(payload) {
 
 function instagramStatusText(payload) {
   const source = signalSources[state.signalSource] || signalSources.instagram;
+  if (payload.cached?.daily) {
+    const savedAt = payload.cached.savedAt || payload.checkedAt;
+    const date = savedAt ? ` from ${formatDateTime(savedAt)}` : "";
+    const next = payload.cached.nextRefreshLabel ? ` Next live refresh: ${payload.cached.nextRefreshLabel}.` : "";
+    if (payload.cached.status === "waiting_for_daily_refresh") {
+      return `${source.label} daily content has not refreshed yet. ${next}`.trim();
+    }
+    if (payload.cached.status === "manual_refresh") {
+      return `${source.label} manually refreshed${date}. ${next}`.trim();
+    }
+    return `Showing ${source.label} content from the daily 9 AM cache${date}.${next}`;
+  }
   if (payload.cached?.stale) {
     const cachedAt = payload.cached.savedAt || payload.checkedAt;
     const date = cachedAt ? ` from ${formatDateTime(cachedAt)}` : "";
@@ -4093,7 +4111,9 @@ function attachActions() {
   document.querySelector("#copyPrompt").addEventListener("click", () => copyText(buildPrompt(), "Prompt copied"));
   document.querySelector("#downloadBrief").addEventListener("click", downloadBrief);
   document.querySelector("#togglePrompt").addEventListener("click", togglePromptPanel);
-  document.querySelector("#refreshInstagram").addEventListener("click", loadInstagramData);
+  document.querySelector("#refreshInstagram").addEventListener("click", () =>
+    loadSignalData(state.signalSource || "instagram", { force: true })
+  );
   document.querySelector("#generateIdeas").addEventListener("click", generateIdeasFromSignals);
   document.querySelector("#postSort").addEventListener("change", (event) => {
     state.mediaSort = event.target.value;
