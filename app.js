@@ -1655,10 +1655,10 @@ function renderIdeas() {
   state.ideas.forEach((idea, index) => {
     const card = template.content.firstElementChild.cloneNode(true);
     renderIdeaCardTitle(card, idea, index, plan);
-    bindIdeaField(card, ".idea-hook", index, "hook", idea.hook);
-    bindIdeaField(card, ".idea-format", index, "format", idea.format);
-    bindIdeaField(card, ".idea-caption", index, "caption", idea.caption);
-    bindIdeaField(card, ".idea-cta", index, "cta", idea.cta);
+    bindIdeaField(card, ".idea-hook", index, "hook", idea.hook, plan);
+    bindIdeaField(card, ".idea-format", index, "format", idea.format, plan);
+    bindIdeaField(card, ".idea-caption", index, "caption", idea.caption, plan);
+    bindIdeaField(card, ".idea-cta", index, "cta", idea.cta, plan);
     bindIdeaPromptControls(card, index);
     grid.append(card);
   });
@@ -1671,13 +1671,24 @@ function renderIdeaCardTitle(card, idea, index, plan) {
 }
 
 function ideaCardTitle(idea, index, plan) {
-  const slotLabel = plan?.slots?.[index]?.label;
-  if (slotLabel) return slotLabel;
+  const slotLabel = plan?.slots?.[index]?.label || `Idea ${index + 1}`;
+  const hookTitle = compactIdeaTitle(idea?.hook);
+  if (hookTitle) return `${slotLabel}: ${hookTitle}`;
 
   const formatLabel = String(idea?.format || "").split(":")[0].trim();
-  if (formatLabel && formatLabel.length <= 32) return titleCase(formatLabel);
+  if (formatLabel && formatLabel.length <= 32) return `${slotLabel}: ${titleCase(formatLabel)}`;
 
-  return `Idea ${index + 1}`;
+  return slotLabel;
+}
+
+function compactIdeaTitle(value, limit = 64) {
+  const text = String(value || "").trim().replace(/\s+/g, " ");
+  if (!text) return "";
+  if (text.length <= limit) return text;
+
+  const clipped = text.slice(0, limit - 3).trim().replace(/[\s:;,.!?-]+$/, "");
+  const wordBoundary = clipped.replace(/\s+\S*$/, "");
+  return `${wordBoundary.length >= 36 ? wordBoundary : clipped}...`;
 }
 
 function titleCase(value) {
@@ -1734,12 +1745,13 @@ function refreshIdeaPrompt(card, index) {
   promptText.value = productionPromptFromIdea(idea);
 }
 
-function bindIdeaField(card, selector, index, key, value) {
+function bindIdeaField(card, selector, index, key, value, plan) {
   const field = card.querySelector(selector);
   field.value = value || "";
   field.addEventListener("input", () => {
     state.ideas[index][key] = field.value;
     state.ideas[index].videoPrompt = productionPromptFromIdea(state.ideas[index]);
+    if (key === "hook" || key === "format") renderIdeaCardTitle(card, state.ideas[index], index, plan);
     const panel = card.querySelector(".idea-prompt-panel");
     if (panel && !panel.hidden) refreshIdeaPrompt(card, index);
     markDirty();
