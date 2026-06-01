@@ -329,9 +329,16 @@ textarea:focus {
 .account-grid,
 .idea-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
   margin-top: 16px;
+}
+
+.account-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.idea-grid {
+  grid-template-columns: 1fr;
 }
 
 .account-card,
@@ -1763,62 +1770,32 @@ pre {
 }
 
 .idea-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--line);
-  padding-bottom: 10px;
+  margin-bottom: 0;
 }
 
 .idea-card-title {
   margin: 0;
   color: var(--primary);
-  font-size: 0.95rem;
+  font-size: 1rem;
   line-height: 1.2;
 }
 
 .idea-card-grid {
-  display: grid;
-  gap: 10px;
+  margin-top: 0;
 }
 
 .idea-card-section {
-  display: grid;
-  gap: 7px;
-}
-
-.idea-section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.idea-section-header span {
-  display: block;
-  color: var(--muted);
-  font-size: 0.74rem;
-  font-weight: 900;
-  text-transform: uppercase;
-}
-
-.idea-edit-button {
-  min-height: 26px;
-  padding: 5px 8px;
-  font-size: 0.72rem;
+  min-width: 0;
 }
 
 .idea-display {
-  min-height: 38px;
-  margin: 0;
-  color: var(--ink);
-  font-size: 0.9rem;
-  line-height: 1.45;
   white-space: pre-wrap;
 }
 
 .idea-edit-field {
-  min-height: 92px;
+  width: 100%;
+  min-height: 150px;
+  margin-top: 6px;
 }
 
 .idea-card-actions {
@@ -1881,6 +1858,10 @@ pre {
   .video-manager-layout,
   .saved-idea-details,
   .saved-idea-full-details {
+    grid-template-columns: 1fr;
+  }
+
+  .idea-grid {
     grid-template-columns: 1fr;
   }
 

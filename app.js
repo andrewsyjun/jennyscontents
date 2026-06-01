@@ -1659,6 +1659,7 @@ function renderIdeas() {
     bindIdeaField(card, ".idea-format", index, "format", idea.format, plan);
     bindIdeaField(card, ".idea-caption", index, "caption", idea.caption, plan);
     bindIdeaField(card, ".idea-cta", index, "cta", idea.cta, plan);
+    bindIdeaCardEdit(card);
     bindIdeaPromptControls(card, index);
     grid.append(card);
   });
@@ -1745,30 +1746,42 @@ function refreshIdeaPrompt(card, index) {
   promptText.value = productionPromptFromIdea(idea);
 }
 
+function bindIdeaCardEdit(card) {
+  const toggle = card.querySelector(".idea-card-edit-toggle");
+  if (!toggle) return;
+
+  toggle.addEventListener("click", () => setIdeaCardEditing(card, !card.classList.contains("is-editing")));
+}
+
+function setIdeaCardEditing(card, isEditing) {
+  const toggle = card.querySelector(".idea-card-edit-toggle");
+  card.classList.toggle("is-editing", isEditing);
+  card.querySelectorAll(".idea-edit-field").forEach((field) => {
+    field.hidden = !isEditing;
+  });
+  card.querySelectorAll(".idea-display").forEach((display) => {
+    display.hidden = isEditing;
+  });
+  if (toggle) {
+    toggle.textContent = isEditing ? "Done" : "Edit";
+    toggle.setAttribute("aria-expanded", isEditing ? "true" : "false");
+  }
+  if (isEditing) card.querySelector(".idea-edit-field")?.focus({ preventScroll: true });
+}
+
 function bindIdeaField(card, selector, index, key, value, plan) {
   const field = card.querySelector(selector);
   const section = field?.closest(".idea-card-section");
   const display = section?.querySelector(".idea-display");
-  const editButton = section?.querySelector(".idea-edit-button");
-  if (!field || !section || !display || !editButton) return;
+  if (!field || !section || !display) return;
 
   field.value = value || "";
   setIdeaDisplay(display, field.value);
 
-  function setEditing(isEditing) {
-    field.hidden = !isEditing;
-    display.hidden = isEditing;
-    editButton.textContent = isEditing ? "Done" : "Edit";
-    editButton.setAttribute("aria-expanded", isEditing ? "true" : "false");
-    section.classList.toggle("is-editing", isEditing);
-    if (isEditing) field.focus({ preventScroll: true });
-  }
-
-  editButton.addEventListener("click", () => setEditing(field.hidden));
   field.addEventListener("keydown", (event) => {
     if (event.key === "Escape" || (event.key === "Enter" && (event.metaKey || event.ctrlKey))) {
       event.preventDefault();
-      setEditing(false);
+      setIdeaCardEditing(card, false);
     }
   });
   field.addEventListener("input", () => {

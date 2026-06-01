@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Jenny's Contents</title>
-    <link rel="stylesheet" href="./styles.css?v=20260601-readcards" />
+    <link rel="stylesheet" href="./styles.css?v=20260601-matchbest" />
   </head>
   <body>
     <header class="app-header">
@@ -394,39 +394,31 @@
 
     <template id="ideaTemplate">
       <article class="idea-card">
-        <header class="idea-card-header">
-          <h3 class="idea-card-title">Idea</h3>
+        <header class="idea-example-header idea-card-header">
+          <div>
+            <p class="eyebrow">Today idea</p>
+            <h3 class="idea-card-title">Idea</h3>
+          </div>
+          <button class="button secondary compact idea-card-edit-toggle" type="button" aria-expanded="false">Edit</button>
         </header>
-        <div class="idea-card-grid">
+        <div class="idea-example-grid idea-card-grid">
           <section class="idea-card-section">
-            <div class="idea-section-header">
-              <span>Hook</span>
-              <button class="button compact idea-edit-button" data-idea-edit="hook" type="button">Edit</button>
-            </div>
+            <span>Hook</span>
             <p class="idea-display idea-hook-display"></p>
             <textarea class="idea-edit-field idea-hook" hidden></textarea>
           </section>
           <section class="idea-card-section">
-            <div class="idea-section-header">
-              <span>Format</span>
-              <button class="button compact idea-edit-button" data-idea-edit="format" type="button">Edit</button>
-            </div>
+            <span>Format</span>
             <p class="idea-display idea-format-display"></p>
             <textarea class="idea-edit-field idea-format" hidden></textarea>
           </section>
           <section class="idea-card-section">
-            <div class="idea-section-header">
-              <span>Caption draft</span>
-              <button class="button compact idea-edit-button" data-idea-edit="caption" type="button">Edit</button>
-            </div>
+            <span>Caption draft</span>
             <p class="idea-display idea-caption-display"></p>
             <textarea class="idea-edit-field idea-caption" hidden></textarea>
           </section>
           <section class="idea-card-section">
-            <div class="idea-section-header">
-              <span>CTA</span>
-              <button class="button compact idea-edit-button" data-idea-edit="cta" type="button">Edit</button>
-            </div>
+            <span>CTA</span>
             <p class="idea-display idea-cta-display"></p>
             <textarea class="idea-edit-field idea-cta" hidden></textarea>
           </section>
@@ -445,6 +437,6 @@
       </article>
     </template>
 
-    <script src="./app.js?v=20260601-readcards" defer></script>
+    <script src="./app.js?v=20260601-matchbest" defer></script>
   </body>
 </html>
