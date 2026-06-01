@@ -15,12 +15,23 @@ const host = process.env.LOCAL_HOST || "127.0.0.1";
 const graphVersion = process.env.META_GRAPH_VERSION || "v25.0";
 const apiFetchTimeoutMs = numberFromEnv("API_FETCH_TIMEOUT_MS", 15000, 1000, 60000);
 const dailyContentTimeZone = process.env.CONTENT_DAILY_TIME_ZONE || "America/Chicago";
-const dailyContentRefreshHour = numberFromEnv("CONTENT_DAILY_REFRESH_HOUR", 9, 0, 23);
+const dailyContentRefreshHour = numberFromEnv("CONTENT_DAILY_REFRESH_HOUR", 7, 0, 23);
+const dailyContentRefreshMinute = numberFromEnv("CONTENT_DAILY_REFRESH_MINUTE", 30, 0, 59);
+const dailyContentAutoBriefEnabled = !["0", "false", "no", "off"].includes(
+  String(process.env.CONTENT_DAILY_AUTO_BRIEF_ENABLED || "true").trim().toLowerCase()
+);
+const dailyContentAutoBriefCheckMs = numberFromEnv(
+  "CONTENT_DAILY_AUTO_BRIEF_CHECK_MS",
+  5 * 60 * 1000,
+  60 * 1000,
+  60 * 60 * 1000
+);
 const dailyContentCacheFile = path.resolve(
   root,
   process.env.CONTENT_DAILY_CACHE_FILE ||
     path.join(process.env.CONTENT_OUTPUT_DIR || "content-strategy", "daily-cache.json")
 );
+let dailyContentAutoBriefRunning = false;
 const tiktokOauthSessions = new Map();
 const xOauthSessions = new Map();
 
@@ -270,6 +281,17 @@ const server = http.createServer((request, response) => {
       return;
     }
 
+    if (url.pathname === "/api/daily/brief") {
+      if (request.method !== "GET") {
+        sendJson(response, 405, { ok: false, message: "Use GET to read the daily brief signal." });
+        return;
+      }
+      handleDailyBriefStatus(url)
+        .then((payload) => sendJson(response, 200, payload))
+        .catch((error) => sendJson(response, 500, { ok: false, message: error.message }));
+      return;
+    }
+
     if (url.pathname.startsWith("/generated-videos/")) {
       const videoPath = resolveGeneratedVideoPath(url.pathname);
       if (!videoPath) {
@@ -304,7 +326,27 @@ server.listen(port, host, () => {
   console.log(`Facebook callback: http://${host}:${port}/auth/facebook/callback`);
   console.log(`TikTok callback: http://${host}:${port}/auth/tiktok/callback`);
   console.log(`X callback: http://${host}:${port}/auth/x/callback`);
+  scheduleDailyContentAutomation();
 });
+
+function scheduleDailyContentAutomation() {
+  if (!dailyContentAutoBriefEnabled) {
+    console.log("Daily content brief automation is disabled.");
+    return;
+  }
+
+  console.log(`Daily content brief automation scheduled after ${dailyContentRefreshTimeLabel()}.`);
+  setTimeout(() => {
+    runDailyContentBriefAutomation({ trigger: "startup" }).catch((error) => {
+      console.error(`Daily content brief automation failed: ${error.message}`);
+    });
+  }, 15_000);
+  setInterval(() => {
+    runDailyContentBriefAutomation({ trigger: "timer" }).catch((error) => {
+      console.error(`Daily content brief automation failed: ${error.message}`);
+    });
+  }, dailyContentAutoBriefCheckMs);
+}
 
 function handleFacebookStart(response) {
   const appId = process.env.META_APP_ID;
@@ -1331,9 +1373,9 @@ async function getDailySignalSummary(sourceId, buildPayload, { force = false } =
       configured: true,
       checkedAt: new Date().toISOString(),
       account: null,
-      message: `${sourceDisplayName(sourceId)} will refresh after ${dailyContentRefreshHour}:00 ${dailyContentTimeZone}.`,
+      message: `${sourceDisplayName(sourceId)} will refresh after ${dailyContentRefreshTimeLabel()}.`,
       sourceStatus: [
-        `Daily content retrieval is scheduled for ${dailyContentRefreshHour}:00 ${dailyContentTimeZone}.`,
+        `Daily content retrieval is scheduled for ${dailyContentRefreshTimeLabel()}.`,
       ],
       warnings: [],
       media: [],
@@ -1343,6 +1385,7 @@ async function getDailySignalSummary(sourceId, buildPayload, { force = false } =
         status: "waiting_for_daily_refresh",
         dayKey: dailyWindow.dayKey,
         refreshHour: dailyContentRefreshHour,
+        refreshMinute: dailyContentRefreshMinute,
         timeZone: dailyContentTimeZone,
       },
     };
@@ -1400,6 +1443,7 @@ function withDailyCacheMetadata(payload, { sourceId, entry, status, dailyWindow 
       dayKey: entry.dayKey,
       savedAt: entry.generatedAt,
       refreshHour: dailyContentRefreshHour,
+      refreshMinute: dailyContentRefreshMinute,
       timeZone: dailyContentTimeZone,
       nextRefreshLabel: dailyWindow.nextRefreshLabel,
     },
@@ -1411,24 +1455,34 @@ function withDailyCacheMetadata(payload, { sourceId, entry, status, dailyWindow 
 }
 
 function dailyCacheStatusLabel(status) {
-  if (status === "daily_refreshed") return `refreshed after ${dailyContentRefreshHour}:00 ${dailyContentTimeZone}`;
+  if (status === "daily_refreshed") return `refreshed after ${dailyContentRefreshTimeLabel()}`;
   if (status === "manual_refresh") return "manually refreshed";
-  if (status === "previous_daily_cached") return `using the previous daily cache until ${dailyContentRefreshHour}:00 ${dailyContentTimeZone}`;
+  if (status === "previous_daily_cached") return `using the previous daily cache until ${dailyContentRefreshTimeLabel()}`;
   if (status === "stale_daily_cache") return "using the last daily cache because live refresh failed";
-  return "served from today's 9 AM cache";
+  return `served from today's ${dailyContentRefreshTimeLabel()} cache`;
 }
 
 function currentDailyContentWindow(now = new Date()) {
   const parts = datePartsInTimeZone(now, dailyContentTimeZone);
   const todayKey = `${parts.year}-${parts.month}-${parts.day}`;
-  const beforeRefresh = Number(parts.hour) < dailyContentRefreshHour;
+  const currentMinuteOfDay = Number(parts.hour) * 60 + Number(parts.minute);
+  const refreshMinuteOfDay = dailyContentRefreshHour * 60 + dailyContentRefreshMinute;
+  const beforeRefresh = currentMinuteOfDay < refreshMinuteOfDay;
   const dayKey = beforeRefresh ? shiftDateKey(todayKey, -1) : todayKey;
   return {
     dayKey,
     beforeRefresh,
     localDateKey: todayKey,
-    nextRefreshLabel: `${beforeRefresh ? todayKey : shiftDateKey(todayKey, 1)} ${String(dailyContentRefreshHour).padStart(2, "0")}:00 ${dailyContentTimeZone}`,
+    nextRefreshLabel: `${beforeRefresh ? todayKey : shiftDateKey(todayKey, 1)} ${dailyContentRefreshClockLabel()} ${dailyContentTimeZone}`,
   };
+}
+
+function dailyContentRefreshClockLabel() {
+  return `${String(dailyContentRefreshHour).padStart(2, "0")}:${String(dailyContentRefreshMinute).padStart(2, "0")}`;
+}
+
+function dailyContentRefreshTimeLabel() {
+  return `${dailyContentRefreshClockLabel()} ${dailyContentTimeZone}`;
 }
 
 function datePartsInTimeZone(date, timeZone) {
@@ -1471,6 +1525,7 @@ function readDailyContentCache() {
       version: 1,
       sources: parsed && typeof parsed.sources === "object" ? parsed.sources : {},
       ideas: parsed && typeof parsed.ideas === "object" ? parsed.ideas : {},
+      autoBrief: parsed && typeof parsed.autoBrief === "object" ? parsed.autoBrief : undefined,
     };
   } catch {
     return { version: 1, sources: {}, ideas: {} };
@@ -2010,6 +2065,223 @@ async function handleBriefSave(payload) {
     filePath,
     drive,
   };
+}
+
+
+async function handleDailyBriefStatus(url) {
+  const force = isForceRefresh(url);
+  if (force || truthy(url.searchParams.get("runIfDue"))) {
+    await runDailyContentBriefAutomation({ force, trigger: force ? "api_force" : "api" });
+  }
+
+  const dailyWindow = currentDailyContentWindow();
+  const cache = readDailyContentCache();
+  const brief = cache.autoBrief && typeof cache.autoBrief === "object" ? cache.autoBrief : null;
+  const ready = brief?.dayKey === dailyWindow.dayKey && brief.status === "ready";
+
+  if (ready) {
+    return {
+      ok: true,
+      status: "ready",
+      dayKey: dailyWindow.dayKey,
+      refreshTime: dailyContentRefreshTimeLabel(),
+      brief,
+    };
+  }
+
+  return {
+    ok: !dailyWindow.beforeRefresh,
+    status: dailyWindow.beforeRefresh ? "waiting_for_daily_refresh" : "not_ready",
+    dayKey: dailyWindow.dayKey,
+    refreshTime: dailyContentRefreshTimeLabel(),
+    nextRefreshLabel: dailyWindow.nextRefreshLabel,
+    brief: brief || null,
+  };
+}
+
+async function runDailyContentBriefAutomation({ force = false, trigger = "timer" } = {}) {
+  if (dailyContentAutoBriefRunning) {
+    return { ok: true, status: "already_running" };
+  }
+
+  const dailyWindow = currentDailyContentWindow();
+  if (!force && dailyWindow.beforeRefresh) {
+    return { ok: true, status: "waiting_for_daily_refresh", dayKey: dailyWindow.dayKey };
+  }
+
+  const cache = readDailyContentCache();
+  const existing = cache.autoBrief && typeof cache.autoBrief === "object" ? cache.autoBrief : null;
+  if (!force && existing?.dayKey === dailyWindow.dayKey && existing.status === "ready") {
+    return { ok: true, status: "daily_cached", brief: existing };
+  }
+
+  dailyContentAutoBriefRunning = true;
+  try {
+    const generatedAt = new Date().toISOString();
+    const sourcePayloads = await refreshDailyBriefSources({ force });
+    const built = buildAutomatedDailyBrief({ sourcePayloads, generatedAt, dayKey: dailyWindow.dayKey });
+    const outputDir = path.join(root, process.env.CONTENT_OUTPUT_DIR || "content-strategy");
+    fs.mkdirSync(outputDir, { recursive: true });
+    const filePath = path.join(outputDir, `jennyscontents-${dailyWindow.dayKey}-daily-brief.md`);
+    fs.writeFileSync(filePath, `${built.markdown}\n`);
+    const drive = await maybeUploadBriefToDrive(filePath, built.markdown);
+    const brief = {
+      ok: true,
+      status: "ready",
+      dayKey: dailyWindow.dayKey,
+      generatedAt,
+      trigger,
+      refreshTime: dailyContentRefreshTimeLabel(),
+      filePath,
+      drive,
+      sourceIds: sourcePayloads.map((item) => item.sourceId),
+      sourceStatus: built.sourceStatus,
+      warnings: built.warnings,
+      summary: built.summary,
+      ideas: built.ideas,
+    };
+    cache.autoBrief = brief;
+    writeDailyContentCache(cache);
+    console.log(`Daily content brief saved for ${dailyWindow.dayKey}: ${path.relative(root, filePath)}`);
+    return { ok: true, status: "ready", brief };
+  } finally {
+    dailyContentAutoBriefRunning = false;
+  }
+}
+
+async function refreshDailyBriefSources({ force = false } = {}) {
+  const sourceIds = csv(process.env.CONTENT_DAILY_AUTO_SOURCES || "instagram,tiktok,x");
+  const rows = [];
+  for (const sourceId of sourceIds) {
+    try {
+      rows.push({ sourceId, payload: await loadDailyBriefSource(sourceId, { force }) });
+    } catch (error) {
+      rows.push({
+        sourceId,
+        payload: {
+          ok: false,
+          configured: false,
+          checkedAt: new Date().toISOString(),
+          message: error.message,
+          sourceStatus: [`${sourceDisplayName(sourceId)} refresh failed: ${error.message}`],
+          warnings: [error.message],
+          media: [],
+          analysis: emptyAnalysis(),
+        },
+      });
+    }
+  }
+  return rows;
+}
+
+function loadDailyBriefSource(sourceId, { force = false } = {}) {
+  const url = new URL(`http://${host}:${port}/api/${sourceId}/summary`);
+  if (sourceId === "instagram") {
+    url.searchParams.set("limit", process.env.CONTENT_DAILY_INSTAGRAM_LIMIT || "12");
+  }
+
+  switch (sourceId) {
+    case "instagram":
+      return getDailySignalSummary("instagram", () => buildInstagramSummary(url), { force });
+    case "tiktok":
+      return getDailySignalSummary("tiktok", () => buildTikTokSummaryResponse(), { force });
+    case "x":
+      return getDailySignalSummary("x", () => buildXSummaryResponse(), { force });
+    default:
+      throw new Error(`Unsupported daily content source: ${sourceId}`);
+  }
+}
+
+function buildAutomatedDailyBrief({ sourcePayloads, generatedAt, dayKey }) {
+  const analysis = mergedDailyContentAnalysis(sourcePayloads);
+  const ideas = automatedDailyContentIdeas(analysis);
+  const sourceStatus = sourcePayloads.flatMap(({ sourceId, payload }) => {
+    const label = sourceDisplayName(sourceId);
+    const status = payload?.ok ? "ready" : "unavailable";
+    return [`${label}: ${status}`, ...(payload?.sourceStatus || [])];
+  });
+  const warnings = sourcePayloads.flatMap(({ payload }) => payload?.warnings || []);
+  const summary = `Daily content brief ready with ${ideas.length} ideas: ${ideas.map((idea) => idea.hook).join("; ")}.`;
+
+  const markdown = `# Jenny's Contents Daily Brief
+
+Generated: ${generatedAt}
+Content day: ${dayKey}
+Market: ${process.env.CONTENT_MARKET || "North Dallas and DFW"}
+
+## Source Signals
+
+${sourceStatus.map((line) => `- ${line}`).join("\n") || "- No sources checked."}
+${warnings.length ? `\n## Warnings\n\n${warnings.map((line) => `- ${line}`).join("\n")}\n` : ""}
+## 3 Ideas To Post Today
+
+${ideas.map((idea, index) => `### ${index + 1}. ${idea.hook}\n\nFormat: ${idea.format}\n\nCaption: ${idea.caption}\n\nCTA: ${idea.cta}`).join("\n\n")}
+`;
+
+  return { markdown, ideas, sourceStatus, warnings, summary };
+}
+
+function mergedDailyContentAnalysis(sourcePayloads) {
+  const topicCounts = new Map();
+  const patternCounts = new Map();
+  const formatCounts = new Map();
+  const addRows = (target, rows) => {
+    for (const row of rows || []) {
+      const name = Array.isArray(row) ? row[0] : row?.name;
+      const count = Number(Array.isArray(row) ? row[1] : row?.count || 1);
+      if (!name) continue;
+      target.set(name, (target.get(name) || 0) + (Number.isFinite(count) ? count : 1));
+    }
+  };
+
+  for (const { payload } of sourcePayloads) {
+    const analysis = payload?.analysis || {};
+    addRows(topicCounts, analysis.topicCategories);
+    addRows(patternCounts, analysis.hookPatterns);
+    addRows(formatCounts, analysis.formatMix);
+  }
+
+  const sorted = (map) => [...map.entries()].sort((a, b) => b[1] - a[1]);
+  return {
+    topicCategories: sorted(topicCounts),
+    hookPatterns: sorted(patternCounts),
+    formatMix: sorted(formatCounts),
+  };
+}
+
+function automatedDailyContentIdeas(analysis) {
+  const topics = signalNamesForBrief(analysis.topicCategories, ["seller prep", "buyer education", "local market"]);
+  const patterns = signalNamesForBrief(analysis.hookPatterns, ["direct advice", "specific checklist", "local market read"]);
+  const formats = signalNamesForBrief(analysis.formatMix, ["talking-head reel", "b-roll reel", "carousel"]);
+  const market = process.env.CONTENT_MARKET || "North Dallas and DFW";
+  const cta = process.env.CONTENT_PRIMARY_CTA || "DM me 'DFW' for the North Dallas guide";
+  const templates = [
+    {
+      hook: `Before you list in ${market}, fix the first-photo areas buyers judge fastest`,
+      caption: "Buyers make a fast first impression. Prep the entry, kitchen surfaces, main living area, and launch timing before the listing goes live.",
+      cta: "DM me 'SELL' for the North Dallas pre-listing timeline.",
+    },
+    {
+      hook: `I would not tour in ${market} until I checked this first`,
+      caption: "A good home search starts with payment comfort, commute, condition, and resale risk before the pretty photos take over.",
+      cta,
+    },
+    {
+      hook: `What changed in the ${market} market this week?`,
+      caption: "Local movement matters more than national headlines. Watch pricing, days on market, and buyer activity before deciding your next move.",
+      cta: "DM me 'DFW' for the current North Dallas market read.",
+    },
+  ];
+
+  return templates.map((template, index) => ({
+    ...template,
+    format: `${formats[index % formats.length]} using a ${patterns[index % patterns.length]} hook around ${topics[index % topics.length]}`,
+  }));
+}
+
+function signalNamesForBrief(rows, fallback) {
+  const names = (rows || []).map((row) => Array.isArray(row) ? row[0] : row?.name).filter(Boolean);
+  return names.length ? names : fallback;
 }
 
 async function handleVideoCreate(payload) {

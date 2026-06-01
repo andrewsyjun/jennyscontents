@@ -378,6 +378,15 @@ function renderInstagramData(payload) {
   updateExtractedIdeaFromPayload(payload);
 }
 
+function cachedDailyRefreshLabel(cached) {
+  const hour = Number(cached?.refreshHour ?? 7);
+  const minute = Number(cached?.refreshMinute ?? 30);
+  const suffix = hour >= 12 ? "PM" : "AM";
+  const displayHour = hour % 12 || 12;
+  const displayMinute = String(Number.isFinite(minute) ? minute : 0).padStart(2, "0");
+  return `${displayHour}:${displayMinute} ${suffix}`;
+}
+
 function instagramStatusText(payload) {
   const source = signalSources[state.signalSource] || signalSources.instagram;
   if (payload.cached?.daily) {
@@ -390,7 +399,7 @@ function instagramStatusText(payload) {
     if (payload.cached.status === "manual_refresh") {
       return `${source.label} manually refreshed${date}. ${next}`.trim();
     }
-    return `Showing ${source.label} content from the daily 9 AM cache${date}.${next}`;
+    return `Showing ${source.label} content from the daily ${cachedDailyRefreshLabel(payload.cached)} cache${date}.${next}`;
   }
   if (payload.cached?.stale) {
     const cachedAt = payload.cached.savedAt || payload.checkedAt;
