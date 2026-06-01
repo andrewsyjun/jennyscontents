@@ -1569,7 +1569,10 @@ Output the final plan as a concise filming brief that can be saved to the Google
 }
 
 function renderPrompt() {
-  document.querySelector("#promptPreview").textContent = buildPrompt();
+  const promptPreview = document.querySelector("#promptPreview");
+  if (promptPreview) {
+    promptPreview.textContent = buildPrompt();
+  }
 }
 
 function filmingFocusPlan() {
@@ -3998,15 +4001,6 @@ function downloadBrief() {
   URL.revokeObjectURL(url);
 }
 
-function togglePromptPanel() {
-  const panel = document.querySelector("#promptPanel");
-  const button = document.querySelector("#togglePrompt");
-  const willShow = panel.hidden;
-  panel.hidden = !willShow;
-  button.textContent = willShow ? "Hide prompt" : "Show prompt";
-  button.setAttribute("aria-expanded", willShow ? "true" : "false");
-}
-
 function createReelPreviewController() {
   const scenes = Array.from(document.querySelectorAll("[data-reel-scene]"));
   const playButton = document.querySelector("#reelPreviewPlay");
@@ -4117,9 +4111,7 @@ function attachActions() {
   });
   window.addEventListener("hashchange", () => renderPage());
   document.querySelector("#copyStrategy").addEventListener("click", () => copyText(briefMarkdown(), "Brief copied"));
-  document.querySelector("#copyPrompt").addEventListener("click", () => copyText(buildPrompt(), "Prompt copied"));
   document.querySelector("#downloadBrief").addEventListener("click", downloadBrief);
-  document.querySelector("#togglePrompt").addEventListener("click", togglePromptPanel);
   document.querySelector("#refreshInstagram").addEventListener("click", () =>
     loadSignalData(state.signalSource || "instagram", { force: true })
   );

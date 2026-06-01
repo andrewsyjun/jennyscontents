@@ -342,8 +342,7 @@ textarea:focus {
 .saved-idea-item,
 .reel-preview-panel,
 .video-manager-panel,
-.cache-panel,
-.brief-preview {
+.cache-panel {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #fff;
@@ -1747,23 +1746,6 @@ textarea:focus {
 .analytics-inputs {
   display: grid;
   gap: 14px;
-}
-
-.brief-preview {
-  display: grid;
-  min-height: 360px;
-  margin-top: 16px;
-  background: #111a16;
-  color: #eef5ee;
-}
-
-.brief-preview .preview-header {
-  align-self: start;
-  justify-content: space-between;
-}
-
-.brief-preview h3 {
-  font-size: 1rem;
 }
 
 pre {
