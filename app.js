@@ -1747,15 +1747,43 @@ function refreshIdeaPrompt(card, index) {
 
 function bindIdeaField(card, selector, index, key, value, plan) {
   const field = card.querySelector(selector);
+  const section = field?.closest(".idea-card-section");
+  const display = section?.querySelector(".idea-display");
+  const editButton = section?.querySelector(".idea-edit-button");
+  if (!field || !section || !display || !editButton) return;
+
   field.value = value || "";
+  setIdeaDisplay(display, field.value);
+
+  function setEditing(isEditing) {
+    field.hidden = !isEditing;
+    display.hidden = isEditing;
+    editButton.textContent = isEditing ? "Done" : "Edit";
+    editButton.setAttribute("aria-expanded", isEditing ? "true" : "false");
+    section.classList.toggle("is-editing", isEditing);
+    if (isEditing) field.focus({ preventScroll: true });
+  }
+
+  editButton.addEventListener("click", () => setEditing(field.hidden));
+  field.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" || (event.key === "Enter" && (event.metaKey || event.ctrlKey))) {
+      event.preventDefault();
+      setEditing(false);
+    }
+  });
   field.addEventListener("input", () => {
     state.ideas[index][key] = field.value;
     state.ideas[index].videoPrompt = productionPromptFromIdea(state.ideas[index]);
+    setIdeaDisplay(display, field.value);
     if (key === "hook" || key === "format") renderIdeaCardTitle(card, state.ideas[index], index, plan);
     const panel = card.querySelector(".idea-prompt-panel");
     if (panel && !panel.hidden) refreshIdeaPrompt(card, index);
     markDirty();
   });
+}
+
+function setIdeaDisplay(display, value) {
+  display.textContent = String(value || "").trim() || "-";
 }
 
 function generateIdeasFromSignals() {
