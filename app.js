@@ -1647,12 +1647,14 @@ function renderFocusPlan() {
 
 function renderIdeas() {
   renderFocusPlan();
+  const plan = filmingFocusPlan();
   const grid = document.querySelector("#ideaGrid");
   const template = document.querySelector("#ideaTemplate");
   grid.innerHTML = "";
 
   state.ideas.forEach((idea, index) => {
     const card = template.content.firstElementChild.cloneNode(true);
+    renderIdeaCardTitle(card, idea, index, plan);
     bindIdeaField(card, ".idea-hook", index, "hook", idea.hook);
     bindIdeaField(card, ".idea-format", index, "format", idea.format);
     bindIdeaField(card, ".idea-caption", index, "caption", idea.caption);
@@ -1660,6 +1662,30 @@ function renderIdeas() {
     bindIdeaPromptControls(card, index);
     grid.append(card);
   });
+}
+
+function renderIdeaCardTitle(card, idea, index, plan) {
+  const title = card.querySelector(".idea-card-title");
+  if (!title) return;
+  title.textContent = ideaCardTitle(idea, index, plan);
+}
+
+function ideaCardTitle(idea, index, plan) {
+  const slotLabel = plan?.slots?.[index]?.label;
+  if (slotLabel) return slotLabel;
+
+  const formatLabel = String(idea?.format || "").split(":")[0].trim();
+  if (formatLabel && formatLabel.length <= 32) return titleCase(formatLabel);
+
+  return `Idea ${index + 1}`;
+}
+
+function titleCase(value) {
+  return String(value || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`)
+    .join(" ");
 }
 
 function bindIdeaPromptControls(card, index) {
