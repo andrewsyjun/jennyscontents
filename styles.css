@@ -1798,36 +1798,8 @@ pre {
   margin-top: 6px;
 }
 
-.idea-card-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: space-between;
-}
-
-.idea-prompt-panel {
-  display: grid;
-  gap: 8px;
-  border-top: 1px solid var(--line);
-  padding-top: 12px;
-}
-
-.idea-prompt-panel[hidden] {
-  display: none;
-}
-
-.idea-prompt-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
 .idea-prompt-title {
   color: var(--primary);
-  font-size: 0.78rem;
-  font-weight: 950;
-  text-transform: uppercase;
 }
 
 .idea-prompt-text {
@@ -1836,6 +1808,10 @@ pre {
   font-size: 0.84rem;
   line-height: 1.5;
   resize: vertical;
+}
+
+.production-notes-panel {
+  margin-top: 16px;
 }
 
 @media (max-width: 1040px) {

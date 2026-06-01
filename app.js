@@ -1701,35 +1701,24 @@ function titleCase(value) {
 }
 
 function bindIdeaPromptControls(card, index) {
-  const toggle = card.querySelector(".idea-prompt-toggle");
   const copy = card.querySelector(".idea-prompt-copy");
   const status = card.querySelector(".idea-prompt-status");
   const promptText = card.querySelector(".idea-prompt-text");
-  const panel = card.querySelector(".idea-prompt-panel");
 
-  if (!toggle || !copy || !status || !promptText || !panel) return;
+  if (!copy || !status || !promptText) return;
 
   const statusId = `ideaPromptStatus${index}`;
   const promptId = `ideaPromptText${index}`;
   status.id = statusId;
   promptText.id = promptId;
-
-  toggle.addEventListener("click", () => {
-    const willShow = panel.hidden;
-    panel.hidden = !willShow;
-    copy.hidden = !willShow;
-    status.hidden = !willShow;
-    toggle.textContent = willShow ? "Hide prompt" : "Create prompt";
-    toggle.setAttribute("aria-expanded", willShow ? "true" : "false");
-    if (willShow) refreshIdeaPrompt(card, index);
-  });
+  refreshIdeaPrompt(card, index);
 
   copy.addEventListener("click", () => {
     refreshIdeaPrompt(card, index);
     copyText(promptText.value, "Prompt copied", {
       button: copy,
       statusSelector: `#${statusId}`,
-      restoreStatus: "Ready",
+      restoreStatus: "Ready to copy",
       restoreHidden: false,
       selectSelector: `#${promptId}`,
     });
@@ -1789,8 +1778,7 @@ function bindIdeaField(card, selector, index, key, value, plan) {
     state.ideas[index].videoPrompt = productionPromptFromIdea(state.ideas[index]);
     setIdeaDisplay(display, field.value);
     if (key === "hook" || key === "format") renderIdeaCardTitle(card, state.ideas[index], index, plan);
-    const panel = card.querySelector(".idea-prompt-panel");
-    if (panel && !panel.hidden) refreshIdeaPrompt(card, index);
+    refreshIdeaPrompt(card, index);
     markDirty();
   });
 }
@@ -2314,14 +2302,17 @@ function compactText(value, limit = 120) {
 
 function renderExtractedIdea(savedIdea) {
   const panel = document.querySelector("#extractedIdeaPanel");
+  const detailPanel = document.querySelector("#contentDetailsPanel");
   if (!panel) return;
 
   if (!savedIdea) {
     panel.hidden = true;
+    if (detailPanel) detailPanel.hidden = true;
     return;
   }
 
   panel.hidden = false;
+  if (detailPanel) detailPanel.hidden = false;
   document.querySelector("#extractedIdeaTitle").textContent = savedIdea.title;
   document.querySelector("#extractedIdeaHook").textContent = savedIdea.idea.hook;
   document.querySelector("#extractedIdeaFormat").textContent = savedIdea.idea.format;

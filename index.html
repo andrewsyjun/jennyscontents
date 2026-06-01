@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Jenny's Contents</title>
-    <link rel="stylesheet" href="./styles.css?v=20260601-matchbest" />
+    <link rel="stylesheet" href="./styles.css?v=20260601-autoprompts" />
   </head>
   <body>
     <header class="app-header">
@@ -231,15 +231,24 @@
               </div>
             </div>
             <textarea id="extractedVideoPrompt" readonly></textarea>
-            <div class="generated-video-panel" id="generatedVideoPanel">
-              <video id="generatedVideo" controls hidden></video>
-              <p id="generatedVideoStatus">No generated video yet</p>
-            </div>
           </div>
-          <p class="idea-basis" id="extractedIdeaBasis"></p>
         </article>
 
         <div class="idea-grid" id="ideaGrid"></div>
+
+        <article class="extracted-idea production-notes-panel" id="contentDetailsPanel" hidden>
+          <div class="idea-example-header">
+            <div>
+              <p class="eyebrow">Production notes</p>
+              <h3>Video status and source signals</h3>
+            </div>
+          </div>
+          <div class="generated-video-panel" id="generatedVideoPanel">
+            <video id="generatedVideo" controls hidden></video>
+            <p id="generatedVideoStatus">No generated video yet</p>
+          </div>
+          <p class="idea-basis" id="extractedIdeaBasis"></p>
+        </article>
 
       </section>
 
@@ -423,20 +432,19 @@
             <textarea class="idea-edit-field idea-cta" hidden></textarea>
           </section>
         </div>
-        <div class="idea-card-actions">
-          <button class="button secondary compact idea-prompt-toggle" type="button" aria-expanded="false">Create prompt</button>
-          <button class="button compact idea-prompt-copy" type="button" hidden>Copy prompt</button>
-          <output class="copy-status idea-prompt-status" aria-live="polite" hidden>Ready</output>
-        </div>
-        <section class="idea-prompt-panel" hidden>
-          <div class="idea-prompt-header">
-            <span class="idea-prompt-title">Production prompt</span>
+        <section class="video-prompt-block idea-prompt-panel">
+          <div class="video-prompt-header">
+            <h4 class="idea-prompt-title">Production prompt</h4>
+            <div class="video-prompt-actions">
+              <button class="button compact idea-prompt-copy" type="button">Copy prompt</button>
+              <output class="copy-status idea-prompt-status" aria-live="polite">Ready to copy</output>
+            </div>
           </div>
           <textarea class="idea-prompt-text" readonly></textarea>
         </section>
       </article>
     </template>
 
-    <script src="./app.js?v=20260601-matchbest" defer></script>
+    <script src="./app.js?v=20260601-autoprompts" defer></script>
   </body>
 </html>
