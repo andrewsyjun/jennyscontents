@@ -1766,6 +1766,46 @@ pre {
   min-height: 78px;
 }
 
+.idea-card-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.idea-prompt-panel {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.idea-prompt-panel[hidden] {
+  display: none;
+}
+
+.idea-prompt-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.idea-prompt-title {
+  color: var(--primary);
+  font-size: 0.78rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.idea-prompt-text {
+  min-height: 220px;
+  color: var(--ink);
+  font-size: 0.84rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
 @media (max-width: 1040px) {
   .form-grid,
   .account-grid,

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Jenny's Contents</title>
-    <link rel="stylesheet" href="./styles.css?v=20260520-appnav" />
+    <link rel="stylesheet" href="./styles.css?v=20260601-cardprompts" />
   </head>
   <body>
     <header class="app-header">
@@ -410,9 +410,20 @@
           CTA
           <textarea class="idea-cta"></textarea>
         </label>
+        <div class="idea-card-actions">
+          <button class="button secondary compact idea-prompt-toggle" type="button" aria-expanded="false">Create prompt</button>
+          <button class="button compact idea-prompt-copy" type="button" hidden>Copy prompt</button>
+          <output class="copy-status idea-prompt-status" aria-live="polite" hidden>Ready</output>
+        </div>
+        <section class="idea-prompt-panel" hidden>
+          <div class="idea-prompt-header">
+            <span class="idea-prompt-title">Production prompt</span>
+          </div>
+          <textarea class="idea-prompt-text" readonly></textarea>
+        </section>
       </article>
     </template>
 
-    <script src="./app.js?v=20260520-appnav" defer></script>
+    <script src="./app.js?v=20260601-cardprompts" defer></script>
   </body>
 </html>

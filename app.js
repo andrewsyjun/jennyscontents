@@ -1657,8 +1657,55 @@ function renderIdeas() {
     bindIdeaField(card, ".idea-format", index, "format", idea.format);
     bindIdeaField(card, ".idea-caption", index, "caption", idea.caption);
     bindIdeaField(card, ".idea-cta", index, "cta", idea.cta);
+    bindIdeaPromptControls(card, index);
     grid.append(card);
   });
+}
+
+function bindIdeaPromptControls(card, index) {
+  const toggle = card.querySelector(".idea-prompt-toggle");
+  const copy = card.querySelector(".idea-prompt-copy");
+  const status = card.querySelector(".idea-prompt-status");
+  const promptText = card.querySelector(".idea-prompt-text");
+  const panel = card.querySelector(".idea-prompt-panel");
+
+  if (!toggle || !copy || !status || !promptText || !panel) return;
+
+  const statusId = `ideaPromptStatus${index}`;
+  const promptId = `ideaPromptText${index}`;
+  status.id = statusId;
+  promptText.id = promptId;
+
+  toggle.addEventListener("click", () => {
+    const willShow = panel.hidden;
+    panel.hidden = !willShow;
+    copy.hidden = !willShow;
+    status.hidden = !willShow;
+    toggle.textContent = willShow ? "Hide prompt" : "Create prompt";
+    toggle.setAttribute("aria-expanded", willShow ? "true" : "false");
+    if (willShow) refreshIdeaPrompt(card, index);
+  });
+
+  copy.addEventListener("click", () => {
+    refreshIdeaPrompt(card, index);
+    copyText(promptText.value, "Prompt copied", {
+      button: copy,
+      statusSelector: `#${statusId}`,
+      restoreStatus: "Ready",
+      restoreHidden: false,
+      selectSelector: `#${promptId}`,
+    });
+  });
+}
+
+function refreshIdeaPrompt(card, index) {
+  const idea = state.ideas[index] || {};
+  const title = card.querySelector(".idea-prompt-title");
+  const promptText = card.querySelector(".idea-prompt-text");
+  if (!title || !promptText) return;
+
+  title.textContent = promptKindForIdea(idea).title;
+  promptText.value = productionPromptFromIdea(idea);
 }
 
 function bindIdeaField(card, selector, index, key, value) {
@@ -1666,6 +1713,9 @@ function bindIdeaField(card, selector, index, key, value) {
   field.value = value || "";
   field.addEventListener("input", () => {
     state.ideas[index][key] = field.value;
+    state.ideas[index].videoPrompt = productionPromptFromIdea(state.ideas[index]);
+    const panel = card.querySelector(".idea-prompt-panel");
+    if (panel && !panel.hidden) refreshIdeaPrompt(card, index);
     markDirty();
   });
 }
@@ -2117,6 +2167,51 @@ function videoPromptFromIdea(savedIdea) {
     "Visual direction: realistic North Dallas/DFW neighborhood feel, bright natural light, clean home details, no fake addresses, no fake prices, no fake client testimonials, no brokerage logos unless provided.",
     "Camera direction: one direct-to-camera opening shot, one quick b-roll cutaway, one direct-to-camera closing shot. Avoid trying to cover a longer full-length reel.",
     `End frame CTA: ${idea.cta}.${reference}`,
+  ].join("\n");
+}
+
+function promptKindForIdea(savedIdea) {
+  const idea = savedIdea.idea || savedIdea;
+  const format = String(idea.format || "").toLowerCase();
+  if (format.includes("carousel")) {
+    return { title: "Carousel prompt", type: "carousel" };
+  }
+  if (/\b(caption|static|image|post)\b/.test(format) && !/\b(reel|video|b-roll|talking)\b/.test(format)) {
+    return { title: "Caption and visual prompt", type: "caption" };
+  }
+  return { title: "Video prompt", type: "video" };
+}
+
+function productionPromptFromIdea(savedIdea) {
+  const kind = promptKindForIdea(savedIdea);
+  if (kind.type === "carousel") return carouselPromptFromIdea(savedIdea);
+  if (kind.type === "caption") return captionVisualPromptFromIdea(savedIdea);
+  return videoPromptFromIdea(savedIdea);
+}
+
+function carouselPromptFromIdea(savedIdea) {
+  const idea = savedIdea.idea || savedIdea;
+  return [
+    "Create an Instagram carousel for a North Dallas real estate audience.",
+    `Cover hook: ${idea.hook}`,
+    "Structure: 6 slides max.",
+    "Slide plan: 1 cover hook, 2 problem/context, 3-5 practical points, 6 CTA.",
+    `Use this format guidance: ${idea.format}`,
+    `Caption: ${idea.caption}`,
+    `CTA: ${idea.cta}`,
+    "Visual direction: clean brokerage-safe design, warm real estate imagery, readable text, no fake client claims, no fake addresses, and no fake prices.",
+  ].join("\n");
+}
+
+function captionVisualPromptFromIdea(savedIdea) {
+  const idea = savedIdea.idea || savedIdea;
+  return [
+    "Create a polished social post package for Jenny Jun's North Dallas real estate audience.",
+    `Hook: ${idea.hook}`,
+    `Format: ${idea.format}`,
+    `Caption draft: ${idea.caption}`,
+    `CTA: ${idea.cta}`,
+    "Visual direction: use a real estate-relevant image or short b-roll concept, keep copy concise, and avoid fake client claims, fake addresses, or fake prices.",
   ].join("\n");
 }
 
@@ -3799,8 +3894,8 @@ ${savedIdea.idea.caption}
 CTA:
 ${savedIdea.idea.cta}
 
-Video prompt:
-${savedIdea.idea.videoPrompt || videoPromptFromIdea(savedIdea)}
+${promptKindForIdea(savedIdea).title}:
+${productionPromptFromIdea(savedIdea)}
 `;
 }
 
@@ -3821,8 +3916,8 @@ ${idea.caption}
 CTA:
 ${idea.cta}
 
-Video prompt:
-${idea.videoPrompt || videoPromptFromIdea(idea)}`
+${promptKindForIdea(idea).title}:
+${productionPromptFromIdea(idea)}`
     )
     .join("\n\n");
 
