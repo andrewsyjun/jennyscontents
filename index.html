@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Jenny's Contents</title>
-    <link rel="stylesheet" href="./styles.css?v=20260601-autoprompts" />
+    <link rel="stylesheet" href="./styles.css?v=20260601-savedsets" />
   </head>
   <body>
     <header class="app-header">
@@ -256,17 +256,17 @@
         <div class="section-heading">
           <div>
             <p class="eyebrow">Saved</p>
-            <h2 id="library-heading">Saved content</h2>
+            <h2 id="library-heading">Saved prompts</h2>
           </div>
           <div class="section-actions">
-            <output class="save-state" id="libraryStatus">Duplicates are cleaned automatically</output>
+            <output class="save-state" id="libraryStatus">Daily prompt sets are grouped by content day</output>
             <button class="button secondary" data-page-link="today" type="button">Back to today</button>
           </div>
         </div>
 
         <article class="saved-ideas-panel">
           <div class="saved-ideas-header">
-            <h3 id="savedIdeasTitle">Saved ideas</h3>
+            <h3 id="savedIdeasTitle">Daily prompt archive</h3>
             <div class="saved-idea-actions">
               <button class="button compact" id="cleanSavedIdeas" type="button">Remove duplicates</button>
               <button class="button compact" id="clearSavedIdeas" type="button">Clear all</button>
@@ -445,6 +445,6 @@
       </article>
     </template>
 
-    <script src="./app.js?v=20260601-autoprompts" defer></script>
+    <script src="./app.js?v=20260601-savedsets" defer></script>
   </body>
 </html>

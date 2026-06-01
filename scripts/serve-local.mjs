@@ -2007,26 +2007,183 @@ async function handleLibraryGet() {
 }
 
 async function handleLibrarySave(payload) {
-  const filePath = libraryFilePath();
   const savedIdeas = Array.isArray(payload.savedIdeas) ? payload.savedIdeas.slice(0, 200) : [];
   const videoJobs = Array.isArray(payload.videoJobs) ? payload.videoJobs.slice(0, 200) : [];
-  const library = {
+  const library = writeContentLibrary({
     version: 1,
     savedIdeas,
     videoJobs,
     updatedAt: new Date().toISOString(),
+  });
+
+  return {
+    ok: true,
+    filePath: libraryFilePath(),
+    videoDir: generatedVideoDir(),
+    library,
+  };
+}
+
+function writeContentLibrary(library) {
+  const filePath = libraryFilePath();
+  const nextLibrary = {
+    ...emptyLibrary(),
+    ...library,
+    savedIdeas: Array.isArray(library.savedIdeas) ? library.savedIdeas.slice(0, 200) : [],
+    videoJobs: Array.isArray(library.videoJobs) ? library.videoJobs.slice(0, 200) : [],
+    updatedAt: library.updatedAt || new Date().toISOString(),
   };
 
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.${crypto.randomBytes(6).toString("hex")}.tmp`;
-  fs.writeFileSync(tempPath, `${JSON.stringify(library, null, 2)}\n`);
+  fs.writeFileSync(tempPath, `${JSON.stringify(nextLibrary, null, 2)}\n`);
   fs.renameSync(tempPath, filePath);
+  return nextLibrary;
+}
 
+function saveAutomatedDailyPromptSet({ dayKey, generatedAt, sourcePayloads, ideas, summary }) {
+  const existing = contentLibraryPayload().library;
+  const promptRows = automatedDailyPromptRows({ dayKey, generatedAt, sourcePayloads, ideas, summary });
+  if (!promptRows.length) return { saved: 0, videoDrafts: 0 };
+
+  const promptKeys = new Set(promptRows.map(dailyPromptStorageKey));
+  const savedIdeas = [
+    ...promptRows,
+    ...existing.savedIdeas.filter((row) => !promptKeys.has(dailyPromptStorageKey(row))),
+  ].slice(0, 200);
+
+  const promptJobs = promptRows.map(videoJobFromSavedIdeaForLibrary);
+  const jobIds = new Set(promptJobs.map((job) => job.ideaId));
+  const videoJobs = [
+    ...promptJobs,
+    ...existing.videoJobs.filter((job) => !jobIds.has(job.ideaId)),
+  ].slice(0, 200);
+
+  writeContentLibrary({
+    version: 1,
+    savedIdeas,
+    videoJobs,
+    updatedAt: generatedAt,
+  });
+
+  return { saved: promptRows.length, videoDrafts: promptJobs.length };
+}
+
+function automatedDailyPromptRows({ dayKey, generatedAt, sourcePayloads, ideas, summary }) {
+  const setId = `content-${dayKey}`;
+  const rows = [];
+  const validIdeas = (ideas || []).filter((idea) => idea?.hook || idea?.caption || idea?.format);
+  if (!validIdeas.length) return rows;
+
+  rows.push(automatedDailyPromptRow({
+    idea: validIdeas[0],
+    dayKey,
+    setId,
+    slot: "source-pick",
+    slotLabel: "Source-derived pick",
+    sourceLabel: "Best idea from posts",
+    generatedAt,
+    summary,
+    sourcePayloads,
+  }));
+
+  validIdeas.slice(0, 3).forEach((idea, index) => {
+    rows.push(automatedDailyPromptRow({
+      idea,
+      dayKey,
+      setId,
+      slot: `today-${index + 1}`,
+      slotLabel: `Reel ${index + 1}`,
+      sourceLabel: "Today plan",
+      generatedAt,
+      summary,
+      sourcePayloads,
+    }));
+  });
+
+  return rows;
+}
+
+function automatedDailyPromptRow({ idea, dayKey, setId, slot, slotLabel, sourceLabel, generatedAt, summary, sourcePayloads }) {
+  const prompt = automatedVideoPromptFromIdea(idea);
+  const sourceNames = sourcePayloads.map(({ sourceId }) => sourceDisplayName(sourceId)).join(" + ");
   return {
-    ok: true,
-    filePath,
-    videoDir: generatedVideoDir(),
-    library,
+    id: `daily-${dayKey}-${slot}`,
+    dailySetId: setId,
+    contentDay: dayKey,
+    dailySlot: slot,
+    dailySlotLabel: slotLabel,
+    dailySaveReason: "server_daily_refresh",
+    sourceId: slot === "source-pick" ? "daily-source-pick" : "today-plan",
+    sourceLabel,
+    title: slotLabel,
+    savedAt: generatedAt,
+    checkedAt: generatedAt,
+    basis: sourceNames ? `Daily refresh from ${sourceNames}` : "Daily content refresh",
+    generationStatus: summary || "Daily prompt generated automatically.",
+    sourceSignals: [],
+    recentCount: sourcePayloads.reduce((sum, item) => sum + Number(item.payload?.analysis?.recentCount || 0), 0),
+    retrievedCount: sourcePayloads.reduce((sum, item) => sum + Number(item.payload?.media?.length || 0), 0),
+    signals: {},
+    idea: {
+      hook: idea.hook || "",
+      format: idea.format || "",
+      caption: idea.caption || "",
+      cta: idea.cta || "",
+      videoPrompt: prompt,
+    },
+  };
+}
+
+function dailyPromptStorageKey(row) {
+  if (row?.contentDay && row?.dailySlot) return `${row.contentDay}:${row.dailySlot}`;
+  return row?.id || "";
+}
+
+function automatedVideoPromptFromIdea(idea) {
+  return [
+    "Create a vertical 9:16 short-form real estate video preview, 10 seconds, natural smartphone footage style, polished but not overproduced.",
+    "Preserve Jenny Jun's brand as a warm North Dallas real estate advisor. Use realistic home, neighborhood, and agent-on-camera visuals.",
+    `Concept: ${idea.hook || "Daily real estate content idea"}`,
+    `Format: ${idea.format || "short reel"}`,
+    "Scene plan: 0-3s Jenny opens with the hook, 3-7s show one supporting home or neighborhood visual, 7-10s Jenny closes with the CTA.",
+    `Voiceover or caption direction: ${idea.caption || "Keep the advice concise and useful."}`,
+    `End frame CTA: ${idea.cta || process.env.CONTENT_PRIMARY_CTA || "DM me for the North Dallas guide"}`,
+    "Avoid fake client claims, fake addresses, fake prices, and brokerage logos unless provided.",
+  ].join("\n");
+}
+
+function videoJobFromSavedIdeaForLibrary(savedIdea) {
+  const prompt = savedIdea.idea?.videoPrompt || automatedVideoPromptFromIdea(savedIdea.idea || {});
+  const now = savedIdea.savedAt || new Date().toISOString();
+  return {
+    id: `video-${crypto.createHash("sha256").update(`${savedIdea.id}|${prompt}`).digest("hex").slice(0, 24)}`,
+    ideaId: savedIdea.id,
+    ideaTitle: savedIdea.title || savedIdea.idea?.hook || "Video prompt",
+    ideaHook: savedIdea.idea?.hook || "",
+    ideaSourceLabel: savedIdea.sourceLabel || "Daily content",
+    ideaSavedAt: savedIdea.savedAt || "",
+    ideaSnapshot: savedIdea.idea || null,
+    title: savedIdea.title || savedIdea.idea?.hook || "Video prompt",
+    sourceLabel: savedIdea.sourceLabel || "Daily content",
+    prompt,
+    status: "prompt_ready",
+    progress: 0,
+    provider: "auto",
+    model: "",
+    seconds: "10",
+    duration: "10",
+    aspectRatio: "9:16",
+    resolution: "720p",
+    size: "720x1280",
+    videoRequestId: "",
+    openaiVideoId: "",
+    videoUrl: "",
+    localUrl: "",
+    referenceImageCount: 0,
+    error: "",
+    createdAt: now,
+    updatedAt: now,
   };
 }
 
@@ -2140,6 +2297,14 @@ async function runDailyContentBriefAutomation({ force = false, trigger = "timer"
       summary: built.summary,
       ideas: built.ideas,
     };
+    const savedPromptSet = saveAutomatedDailyPromptSet({
+      dayKey: dailyWindow.dayKey,
+      generatedAt,
+      sourcePayloads,
+      ideas: built.ideas,
+      summary: built.summary,
+    });
+    brief.savedPromptSet = savedPromptSet;
     cache.autoBrief = brief;
     writeDailyContentCache(cache);
     console.log(`Daily content brief saved for ${dailyWindow.dayKey}: ${path.relative(root, filePath)}`);

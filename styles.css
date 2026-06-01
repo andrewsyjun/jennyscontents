@@ -499,7 +499,61 @@ textarea:focus {
   margin-top: 12px;
 }
 
+.saved-day-group {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: 13px;
+}
+
+.saved-day-group.is-daily {
+  border-color: rgb(36 87 70 / 22%);
+}
+
+.saved-day-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+}
+
+.saved-day-header h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.saved-day-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.saved-day-meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-strong);
+  color: var(--muted);
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.saved-day-items {
+  display: grid;
+  gap: 8px;
+}
+
 .saved-idea-item {
+  border-radius: 6px;
   background: var(--panel-strong);
   box-shadow: none;
   overflow: hidden;

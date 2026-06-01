@@ -3,8 +3,8 @@ const SIGNAL_CACHE_KEY = "jennyscontents.signalCache.v1";
 const TIKTOK_IMPORT_KEY = "jennyscontents.tiktokImports.v1";
 const SAVED_IDEAS_KEY = "jennyscontents.savedIdeas.v1";
 const VIDEO_JOBS_KEY = "jennyscontents.videoJobs.v1";
-const MAX_SAVED_IDEAS = 40;
-const MAX_VIDEO_JOBS = 40;
+const MAX_SAVED_IDEAS = 200;
+const MAX_VIDEO_JOBS = 200;
 const REVIEW_TOKEN_KEY = "jennyscontents.facebookReviewToken";
 const META_APP_ID = "859442203159885";
 const FACEBOOK_LOGIN_CONFIG_ID = "2173649920103461";
@@ -1780,6 +1780,7 @@ function bindIdeaField(card, selector, index, key, value, plan) {
     if (key === "hook" || key === "format") renderIdeaCardTitle(card, state.ideas[index], index, plan);
     refreshIdeaPrompt(card, index);
     markDirty();
+    queueDailyPromptSetSave();
   });
 }
 
@@ -1809,6 +1810,9 @@ function generateIdeasFromSignals() {
   renderIdeas();
   renderPrompt();
   markDirty();
+  saveDailyPromptSet({ createVideoDrafts: true, reason: "ideas_generated" });
+  renderSavedIdeas();
+  renderVideoManager();
 }
 
 function signalNames(rows, fallback) {
@@ -2058,8 +2062,7 @@ async function updateExtractedIdeaFromPayload(payload) {
 
   latestExtractedIdea = finalIdea;
   renderExtractedIdea(finalIdea);
-  saveExtractedIdea(finalIdea);
-  saveVideoPromptFromIdea(finalIdea);
+  saveDailyPromptSet({ bestIdea: finalIdea, createVideoDrafts: true, reason: "best_idea_ready" });
   renderSavedIdeas();
   renderVideoManager();
 }
@@ -3154,6 +3157,9 @@ function dedupeSimilarRows(rows, isSimilar, preferred) {
 function areSimilarSavedIdeas(a, b) {
   if (!a || !b) return false;
   if (a.id && b.id && a.id === b.id) return true;
+  if (isDailyPromptRow(a) || isDailyPromptRow(b)) {
+    return dailyPromptStorageKey(a) && dailyPromptStorageKey(a) === dailyPromptStorageKey(b);
+  }
 
   const hookScore = textSimilarity(a.idea?.hook || a.title || "", b.idea?.hook || b.title || "");
   const titleScore = textSimilarity(a.title || a.idea?.hook || "", b.title || b.idea?.hook || "");
@@ -3489,6 +3495,126 @@ function saveExtractedIdea(savedIdea) {
   writeSavedIdeas(sortSavedIdeas(dedupeSimilarRows(nextRows, areSimilarSavedIdeas, preferredSavedIdea).rows));
 }
 
+function queueDailyPromptSetSave() {
+  window.clearTimeout(queueDailyPromptSetSave.timer);
+  queueDailyPromptSetSave.timer = window.setTimeout(() => {
+    const result = saveDailyPromptSet({ createVideoDrafts: true, reason: "card_edited" });
+    if (result.saved) {
+      renderSavedIdeas();
+      renderVideoManager();
+    }
+  }, 700);
+}
+
+function saveDailyPromptSet({ bestIdea = latestExtractedIdea, createVideoDrafts = false, reason = "daily_set" } = {}) {
+  const rows = buildDailyPromptSetRows({ bestIdea, reason });
+  if (!rows.length) return { saved: 0, videoDrafts: 0 };
+
+  const keys = new Set(rows.map(dailyPromptStorageKey).filter(Boolean));
+  const existingRows = readSavedIdeas();
+  const preservedRows = existingRows.filter((row) => !keys.has(dailyPromptStorageKey(row)));
+  const nextRows = sortSavedIdeas([...rows, ...preservedRows]);
+  writeSavedIdeas(nextRows);
+
+  let videoDrafts = 0;
+  if (createVideoDrafts) {
+    rows.forEach((row) => {
+      if (saveVideoPromptFromIdea(row)) videoDrafts += 1;
+    });
+  }
+
+  return { saved: rows.length, videoDrafts };
+}
+
+function buildDailyPromptSetRows({ bestIdea = latestExtractedIdea, reason = "daily_set" } = {}) {
+  const dayKey = currentContentDayKey();
+  const now = new Date().toISOString();
+  const setId = `content-${dayKey}`;
+  const rows = [];
+
+  if (bestIdea?.idea?.hook) {
+    rows.push(dailyPromptRow({
+      savedIdea: bestIdea,
+      dayKey,
+      setId,
+      slot: "source-pick",
+      slotLabel: "Source-derived pick",
+      sourceLabel: bestIdea.sourceLabel || "Best idea from posts",
+      reason,
+      savedAt: now,
+    }));
+  }
+
+  const plan = filmingFocusPlan();
+  (Array.isArray(state.ideas) ? state.ideas : []).slice(0, 3).forEach((idea, index) => {
+    if (!idea?.hook && !idea?.caption && !idea?.format) return;
+    const slotLabel = plan.slots?.[index]?.label || `Idea ${index + 1}`;
+    rows.push(dailyPromptRow({
+      savedIdea: {
+        sourceId: "today-plan",
+        sourceLabel: "Today plan",
+        title: ideaCardTitle(idea, index, plan),
+        basis: bestIdea?.basis || "Generated from today's refreshed content signals.",
+        generationStatus: "Today plan prompt generated from the editable content card.",
+        sourceSignals: bestIdea?.sourceSignals || [],
+        recentCount: bestIdea?.recentCount || 0,
+        retrievedCount: bestIdea?.retrievedCount || 0,
+        checkedAt: bestIdea?.checkedAt || now,
+        signals: bestIdea?.signals || {},
+        idea: { ...idea },
+      },
+      dayKey,
+      setId,
+      slot: `today-${index + 1}`,
+      slotLabel,
+      sourceLabel: "Today plan",
+      reason,
+      savedAt: now,
+    }));
+  });
+
+  return rows;
+}
+
+function dailyPromptRow({ savedIdea, dayKey, setId, slot, slotLabel, sourceLabel, reason, savedAt }) {
+  const idea = savedIdea.idea || {};
+  const row = {
+    ...savedIdea,
+    id: `daily-${dayKey}-${slot}`,
+    originalIdeaId: savedIdea.id || "",
+    dailySetId: setId,
+    contentDay: dayKey,
+    dailySlot: slot,
+    dailySlotLabel: slotLabel,
+    dailySaveReason: reason,
+    title: slotLabel,
+    sourceLabel,
+    savedAt,
+    idea: {
+      hook: idea.hook || "",
+      format: idea.format || "",
+      caption: idea.caption || "",
+      cta: idea.cta || "",
+      videoPrompt: productionPromptFromIdea(idea),
+    },
+  };
+  row.idea.videoPrompt = productionPromptFromIdea(row);
+  return row;
+}
+
+function currentContentDayKey(date = new Date()) {
+  return date.toLocaleDateString("en-CA", { timeZone: "America/Chicago" });
+}
+
+function isDailyPromptRow(row) {
+  return Boolean(row?.contentDay && row?.dailySlot);
+}
+
+function dailyPromptStorageKey(row) {
+  if (!isDailyPromptRow(row)) return row?.id || "";
+  return `${row.contentDay}:${row.dailySlot}`;
+}
+
 function renderSavedIdeas() {
   const list = document.querySelector("#savedIdeasList");
   const title = document.querySelector("#savedIdeasTitle");
@@ -3498,7 +3624,7 @@ function renderSavedIdeas() {
   const videoJobs = readVideoJobs();
   const rowIds = new Set(rows.map((row) => row.id));
   expandedSavedIdeaIds = new Set([...expandedSavedIdeaIds].filter((id) => rowIds.has(id)));
-  title.textContent = `Saved ideas (${formatNumber(rows.length)})`;
+  title.textContent = `Saved daily prompts (${formatNumber(rows.length)})`;
   list.innerHTML = "";
 
   const clearButton = document.querySelector("#clearSavedIdeas");
@@ -3507,76 +3633,168 @@ function renderSavedIdeas() {
   if (!rows.length) {
     const empty = document.createElement("p");
     empty.className = "empty-state";
-    empty.textContent = "No saved ideas yet.";
+    empty.textContent = "No saved daily prompts yet.";
     list.append(empty);
     return;
   }
 
-  rows.forEach((savedIdea) => {
-    const relatedJob = findVideoJobForSavedIdea(savedIdea, videoJobs);
-    const isExpanded = expandedSavedIdeaIds.has(savedIdea.id);
-    const item = document.createElement("article");
-    item.className = `saved-idea-item${isExpanded ? " is-expanded" : ""}`;
-    item.dataset.savedIdeaId = savedIdea.id;
+  savedIdeaDayGroups(rows).forEach((group) => {
+    const groupEl = document.createElement("article");
+    groupEl.className = `saved-day-group${group.isDaily ? " is-daily" : ""}`;
 
-    const row = document.createElement("div");
-    row.className = "saved-idea-summary-row";
-    row.dataset.savedIdeaToggle = savedIdea.id;
+    const header = document.createElement("div");
+    header.className = "saved-day-header";
+    const heading = document.createElement("div");
+    const eyebrow = document.createElement("p");
+    eyebrow.className = "eyebrow";
+    eyebrow.textContent = group.isDaily ? "Daily content set" : "Saved prompts";
+    const h4 = document.createElement("h4");
+    h4.textContent = group.title;
+    heading.append(eyebrow, h4);
 
-    const toggle = document.createElement("button");
-    toggle.className = "saved-idea-toggle";
-    toggle.type = "button";
-    toggle.dataset.savedIdeaToggle = savedIdea.id;
-    toggle.setAttribute("aria-expanded", isExpanded ? "true" : "false");
-    toggle.setAttribute("aria-label", `${isExpanded ? "Collapse" : "Expand"} saved idea`);
-    toggle.textContent = isExpanded ? "v" : ">";
-
-    const titleBlock = document.createElement("div");
-    titleBlock.className = "saved-idea-title-block";
-    const hook = document.createElement("strong");
-    hook.textContent = savedIdea.idea?.hook || "Saved idea";
-    const meta = document.createElement("span");
-    meta.textContent = [
-      savedIdea.sourceLabel || "Posts",
-      savedIdea.savedAt ? formatDateTime(savedIdea.savedAt) : "",
-      savedIdea.signals?.topic,
-      savedIdea.signals?.pattern,
-    ]
-      .filter(Boolean)
-      .join(" · ");
-    titleBlock.append(hook, meta);
-
-    const videoSummary = document.createElement("span");
-    videoSummary.className = `saved-idea-row-status${relatedJob ? " is-linked" : ""}`;
-    videoSummary.textContent = relatedJob ? `Video: ${videoStatusSummaryLabel(relatedJob)}` : "No video draft";
-
-    row.append(toggle, titleBlock, videoSummary);
-
-    const details = document.createElement("div");
-    details.className = "saved-idea-details";
-    details.hidden = !isExpanded;
-
-    const actions = document.createElement("div");
-    actions.className = "saved-idea-actions";
-    actions.append(
-      savedIdeaActionButton("Use in Today", "use", savedIdea.id),
-      savedIdeaActionButton("Copy idea", "copy", savedIdea.id),
-      savedIdeaActionButton("Delete idea", "delete", savedIdea.id)
+    const meta = document.createElement("div");
+    meta.className = "saved-day-meta";
+    meta.append(
+      savedDayPill(`${formatNumber(group.rows.length)} prompt${group.rows.length === 1 ? "" : "s"}`),
+      savedDayPill(group.isDaily ? "Source pick + Today plan" : "Ungrouped")
     );
+    header.append(heading, meta);
 
-    const videoLink = document.createElement("p");
-    videoLink.className = `saved-video-link${relatedJob ? " is-linked" : ""}`;
-    videoLink.classList.toggle("is-error", Boolean(relatedJob?.error));
-    videoLink.textContent = relatedJob
-      ? `Video draft: ${videoStatusLabel(relatedJob)}`
-      : "Video draft: not saved yet";
-    const fullDetails = renderSavedIdeaFullDetails(savedIdea);
-    const linkedVideo = renderSavedIdeaVideoBlock(savedIdea, relatedJob);
+    const body = document.createElement("div");
+    body.className = "saved-day-items";
+    group.rows.forEach((savedIdea) => {
+      body.append(renderSavedIdeaItem(savedIdea, videoJobs));
+    });
 
-    details.append(actions, videoLink, fullDetails, linkedVideo);
-    item.append(row, details);
-    list.append(item);
+    groupEl.append(header, body);
+    list.append(groupEl);
   });
+}
+
+function savedDayPill(text) {
+  const pill = document.createElement("span");
+  pill.textContent = text;
+  return pill;
+}
+
+function savedIdeaDayGroups(rows) {
+  const groups = new Map();
+  sortSavedIdeas(rows).forEach((row) => {
+    const key = savedIdeaDayKey(row);
+    const group = groups.get(key) || {
+      key,
+      isDaily: Boolean(row.contentDay),
+      title: savedIdeaDayTitle(key),
+      rows: [],
+    };
+    group.isDaily = group.isDaily || Boolean(row.contentDay);
+    group.rows.push(row);
+    groups.set(key, group);
+  });
+
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      rows: group.rows.slice().sort(compareSavedIdeaWithinDay),
+    }))
+    .sort(compareSavedIdeaDayGroup);
+}
+
+function compareSavedIdeaDayGroup(a, b) {
+  if (a.key === "unscheduled") return 1;
+  if (b.key === "unscheduled") return -1;
+  return b.key.localeCompare(a.key);
+}
+
+function savedIdeaDayKey(row) {
+  if (row?.contentDay) return row.contentDay;
+  const date = row?.savedAt || row?.checkedAt || "";
+  return /^\d{4}-\d{2}-\d{2}/.test(date) ? date.slice(0, 10) : "unscheduled";
+}
+
+function savedIdeaDayTitle(key) {
+  if (key === "unscheduled") return "Unscheduled saved prompts";
+  const date = new Date(`${key}T12:00:00`);
+  if (Number.isNaN(date.valueOf())) return key;
+  return date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+}
+
+function compareSavedIdeaWithinDay(a, b) {
+  const slot = (row) => {
+    if (row.dailySlot === "source-pick") return 0;
+    const match = String(row.dailySlot || "").match(/today-(\d+)/);
+    if (match) return Number(match[1]);
+    return 9;
+  };
+  const slotDiff = slot(a) - slot(b);
+  if (slotDiff) return slotDiff;
+  return dateValue(b.savedAt || b.checkedAt) - dateValue(a.savedAt || a.checkedAt);
+}
+
+function renderSavedIdeaItem(savedIdea, videoJobs) {
+  const relatedJob = findVideoJobForSavedIdea(savedIdea, videoJobs);
+  const isExpanded = expandedSavedIdeaIds.has(savedIdea.id);
+  const item = document.createElement("article");
+  item.className = `saved-idea-item${isExpanded ? " is-expanded" : ""}`;
+  item.dataset.savedIdeaId = savedIdea.id;
+
+  const row = document.createElement("div");
+  row.className = "saved-idea-summary-row";
+  row.dataset.savedIdeaToggle = savedIdea.id;
+
+  const toggle = document.createElement("button");
+  toggle.className = "saved-idea-toggle";
+  toggle.type = "button";
+  toggle.dataset.savedIdeaToggle = savedIdea.id;
+  toggle.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+  toggle.setAttribute("aria-label", `${isExpanded ? "Collapse" : "Expand"} saved idea`);
+  toggle.textContent = isExpanded ? "v" : ">";
+
+  const titleBlock = document.createElement("div");
+  titleBlock.className = "saved-idea-title-block";
+  const hook = document.createElement("strong");
+  hook.textContent = savedIdea.idea?.hook || savedIdea.title || "Saved idea";
+  const meta = document.createElement("span");
+  meta.textContent = [
+    savedIdea.dailySlotLabel || savedIdea.sourceLabel || "Prompt",
+    savedIdea.sourceLabel && savedIdea.dailySlotLabel ? savedIdea.sourceLabel : "",
+    savedIdea.signals?.topic,
+    savedIdea.signals?.pattern,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  titleBlock.append(hook, meta);
+
+  const videoSummary = document.createElement("span");
+  videoSummary.className = `saved-idea-row-status${relatedJob ? " is-linked" : ""}`;
+  videoSummary.textContent = relatedJob ? `Video: ${videoStatusSummaryLabel(relatedJob)}` : "Prompt ready";
+
+  row.append(toggle, titleBlock, videoSummary);
+
+  const details = document.createElement("div");
+  details.className = "saved-idea-details";
+  details.hidden = !isExpanded;
+
+  const actions = document.createElement("div");
+  actions.className = "saved-idea-actions";
+  actions.append(
+    savedIdeaActionButton("Use in Today", "use", savedIdea.id),
+    savedIdeaActionButton("Copy idea", "copy", savedIdea.id),
+    savedIdeaActionButton("Delete idea", "delete", savedIdea.id)
+  );
+
+  const videoLink = document.createElement("p");
+  videoLink.className = `saved-video-link${relatedJob ? " is-linked" : ""}`;
+  videoLink.classList.toggle("is-error", Boolean(relatedJob?.error));
+  videoLink.textContent = relatedJob
+    ? `Video draft: ${videoStatusLabel(relatedJob)}`
+    : "Video draft: prompt ready, not generated yet";
+  const fullDetails = renderSavedIdeaFullDetails(savedIdea);
+  const linkedVideo = renderSavedIdeaVideoBlock(savedIdea, relatedJob);
+
+  details.append(actions, videoLink, fullDetails, linkedVideo);
+  item.append(row, details);
+  return item;
 }
 
 function renderSavedIdeaFullDetails(savedIdea) {
@@ -3928,10 +4146,10 @@ function handleLinkedVideoAction(button) {
 function clearSavedIdeas() {
   const rows = readSavedIdeas();
   if (!rows.length) return;
-  if (!window.confirm("Clear all saved ideas?")) return;
+  if (!window.confirm("Clear all saved daily prompts?")) return;
   writeSavedIdeas([]);
   renderSavedIdeas();
-  setLibraryStatus("Saved ideas cleared.");
+  setLibraryStatus("Saved daily prompts cleared.");
 }
 
 function cleanSavedIdeas() {
@@ -4029,11 +4247,19 @@ async function saveBriefToDrive() {
     const fileName = payload.filePath ? payload.filePath.split(/[\\/]/).pop() : "";
     const location = payload.drive?.uploaded ? "Drive" : "this computer";
     const message = `Brief saved to ${location}${fileName ? ` (${fileName})` : ""} at ${savedAt}`;
+    const dailyPromptSet = saveDailyPromptSet({ createVideoDrafts: true, reason: "brief_saved" });
+    const promptMessage = dailyPromptSet.saved
+      ? ` ${formatNumber(dailyPromptSet.saved)} daily prompts saved.`
+      : "";
     saveState.textContent = payload.drive?.uploaded ? "Brief saved to Drive" : "Brief saved locally";
     button.textContent = "Saved";
     if (briefStatus) {
       briefStatus.hidden = false;
-      briefStatus.textContent = message;
+      briefStatus.textContent = `${message}${promptMessage}`;
+    }
+    if (dailyPromptSet.saved) {
+      renderSavedIdeas();
+      renderVideoManager();
     }
   } catch (error) {
     const message = `Save failed: ${error.message}`;
