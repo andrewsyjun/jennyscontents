@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Jun Residential">
+  <rect width="64" height="64" rx="12" fill="#0B1F3A"/>
+  <path d="M13 27 32 12 51 27" fill="none" stroke="#C8A35D" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M39 24H29" fill="none" stroke="#F8F5EC" stroke-width="6" stroke-linecap="round"/>
+  <path d="M38 24v18c0 9-6 15-15 15-5 0-9-2-12-5" fill="none" stroke="#F8F5EC" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
