@@ -74,7 +74,7 @@ async function routeRequest(request, response) {
       return;
     }
 
-    if (request.method === "GET" && ["/favicon.ico", "/favicon.svg", "/apple-touch-icon.png"].includes(url.pathname)) {
+    if (request.method === "GET" && ["/favicon.ico", "/favicon.png", "/apple-touch-icon.png"].includes(url.pathname)) {
       sendStaticIcon(response, url.pathname);
       return;
     }
@@ -827,7 +827,7 @@ function pageShell({ title, body }) {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(title)}</title>
     <link rel="icon" href="/favicon.ico" sizes="any" />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.png" type="image/png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <style>
       :root {
