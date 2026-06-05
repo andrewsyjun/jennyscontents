@@ -74,6 +74,11 @@ async function routeRequest(request, response) {
       return;
     }
 
+    if (request.method === "GET" && ["/favicon.ico", "/favicon.svg", "/apple-touch-icon.png"].includes(url.pathname)) {
+      sendStaticIcon(response, url.pathname);
+      return;
+    }
+
     if (request.method === "HEAD" && url.pathname === "/health") {
       send(response, 200, "", "application/json; charset=utf-8", { "Cache-Control": "no-store" });
       return;
@@ -821,6 +826,9 @@ function pageShell({ title, body }) {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(title)}</title>
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <style>
       :root {
         color-scheme: light;
@@ -1488,6 +1496,27 @@ function redirect(response, location) {
 
 function sendJson(response, status, payload) {
   send(response, status, JSON.stringify(payload), "application/json; charset=utf-8");
+}
+
+function sendStaticIcon(response, pathname) {
+  const filename = pathname.slice(1);
+  const fullPath = path.join(root, filename);
+  if (!fs.existsSync(fullPath)) {
+    send(response, 404, "Not found", "text/plain; charset=utf-8");
+    return;
+  }
+
+  const contentType =
+    filename.endsWith(".svg") ? "image/svg+xml" :
+    filename.endsWith(".png") ? "image/png" :
+    "image/x-icon";
+  const body = fs.readFileSync(fullPath);
+  response.writeHead(200, {
+    "Content-Type": contentType,
+    "Content-Length": body.length,
+    "Cache-Control": "public, max-age=86400",
+  });
+  response.end(body);
 }
 
 function send(response, status, body, contentType = "text/html; charset=utf-8", headers = {}) {
