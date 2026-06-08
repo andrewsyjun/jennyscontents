@@ -2462,7 +2462,13 @@ async function handleVideoCreate(payload) {
     return handleXaiVideoCreate({ payload, prompt, checkedAt });
   }
 
-  return handleOpenAIVideoCreate({ payload, prompt, checkedAt });
+  return {
+    ok: false,
+    configured: false,
+    checkedAt,
+    provider: provider || "none",
+    message: "OpenAI video generation through OAuth is not available in this local app. Use VIDEO_PROVIDER=xai or upload a finished video.",
+  };
 }
 
 async function handleVideoUpload(request) {
@@ -2574,45 +2580,6 @@ async function readMultipartVideoUpload(request) {
   return { fields, file, fileName, mimeType };
 }
 
-async function handleOpenAIVideoCreate({ payload, prompt, checkedAt }) {
-  const apiKey = process.env.OPENAI_API_KEY;
-
-  if (!apiKey) {
-    return {
-      ok: false,
-      configured: false,
-      checkedAt,
-      message: setupVideoMessage("OpenAI"),
-    };
-  }
-
-  const model = payload.model || process.env.OPENAI_VIDEO_MODEL || "sora-2";
-  const seconds = String(payload.seconds || process.env.OPENAI_VIDEO_SECONDS || "4");
-  const size = payload.size || process.env.OPENAI_VIDEO_SIZE || "720x1280";
-  const body = new FormData();
-  body.set("model", model);
-  body.set("prompt", prompt);
-  body.set("seconds", seconds);
-  body.set("size", size);
-
-  const response = await fetch("https://api.openai.com/v1/videos", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body,
-  });
-  const video = await parseResponse(response, "OpenAI video create");
-
-  return {
-    ok: true,
-    configured: true,
-    checkedAt,
-    provider: "openai",
-    video: openAIVideoJobPayload(video),
-  };
-}
-
 async function handleVideoStatus(url) {
   const checkedAt = new Date().toISOString();
   const id = String(url.searchParams.get("id") || "").trim();
@@ -2626,39 +2593,12 @@ async function handleVideoStatus(url) {
     return handleXaiVideoStatus({ id, checkedAt });
   }
 
-  return handleOpenAIVideoStatus({ id, checkedAt });
-}
-
-async function handleOpenAIVideoStatus({ id, checkedAt }) {
-  const apiKey = process.env.OPENAI_API_KEY;
-
-  if (!apiKey) {
-    return {
-      ok: false,
-      configured: false,
-      checkedAt,
-      message: setupVideoMessage("OpenAI"),
-    };
-  }
-
-  const response = await fetch(`https://api.openai.com/v1/videos/${encodeURIComponent(id)}`, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-  });
-  const video = await parseResponse(response, "OpenAI video status");
-  const payload = openAIVideoJobPayload(video);
-
-  if (payload.status === "completed") {
-    payload.localUrl = await downloadOpenAIVideo({ apiKey, id });
-  }
-
   return {
-    ok: true,
-    configured: true,
+    ok: false,
+    configured: false,
     checkedAt,
-    provider: "openai",
-    video: payload,
+    provider: provider || "none",
+    message: "OpenAI video status through OAuth is not available in this local app. Use xAI video jobs or uploaded videos.",
   };
 }
 
@@ -2777,7 +2717,7 @@ function resolveVideoProvider(payload = {}, options = {}) {
 
   if (requested) return requested;
 
-  return process.env.XAI_API_KEY ? "xai" : "openai";
+  return "xai";
 }
 
 function normalizeVideoProvider(value) {
@@ -2792,7 +2732,7 @@ function setupVideoMessage(provider) {
   if (provider === "xAI") {
     return "XAI_API_KEY is required to create videos with xAI. Create an API key in the xAI Console and save it to .env.";
   }
-  return "OPENAI_API_KEY is required for OpenAI videos, or set VIDEO_PROVIDER=xai with XAI_API_KEY to use xAI.";
+  return "Set VIDEO_PROVIDER=xai with XAI_API_KEY, or upload a finished video.";
 }
 
 function xaiAccessMessage(keyStatus) {
@@ -2839,7 +2779,7 @@ function xaiVideoModel(payload = {}) {
 
 function videoDuration(payload = {}, max = 15) {
   return clampNumber(
-    payload.duration || process.env.XAI_VIDEO_DURATION || payload.seconds || process.env.OPENAI_VIDEO_SECONDS || 15,
+    payload.duration || process.env.XAI_VIDEO_DURATION || payload.seconds || 15,
     1,
     max
   );
@@ -2898,23 +2838,6 @@ Source planning prompt to adapt:
 ${sourcePrompt}`;
 }
 
-function openAIVideoJobPayload(video) {
-  return {
-    id: video.id || "",
-    provider: "openai",
-    model: video.model || "",
-    status: video.status || "",
-    progress: number(video.progress),
-    seconds: video.seconds || "",
-    size: video.size || "",
-    prompt: video.prompt || "",
-    error: video.error?.message || video.error || "",
-    createdAt: video.created_at ? new Date(Number(video.created_at) * 1000).toISOString() : "",
-    completedAt: video.completed_at ? new Date(Number(video.completed_at) * 1000).toISOString() : "",
-    expiresAt: video.expires_at ? new Date(Number(video.expires_at) * 1000).toISOString() : "",
-  };
-}
-
 function xaiVideoJobPayload(video, context = {}) {
   const result = video.video || {};
   const status = normalizeXaiVideoStatus(video.status);
@@ -2959,32 +2882,6 @@ function xaiVideoProgress(video, status) {
   return 0;
 }
 
-async function downloadOpenAIVideo({ apiKey, id }) {
-  const dir = generatedVideoDir();
-  fs.mkdirSync(dir, { recursive: true });
-  const filePath = path.join(dir, `${safeFileName(id)}.mp4`);
-  const localUrl = `/generated-videos/${path.basename(filePath)}`;
-
-  if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
-    return localUrl;
-  }
-
-  const response = await fetch(`https://api.openai.com/v1/videos/${encodeURIComponent(id)}/content`, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-  });
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(text || `OpenAI video download failed with HTTP ${response.status}`);
-  }
-
-  const buffer = Buffer.from(await response.arrayBuffer());
-  fs.writeFileSync(filePath, buffer);
-  return localUrl;
-}
-
 async function downloadRemoteVideoUrl({ sourceUrl, id, provider }) {
   const dir = generatedVideoDir();
   fs.mkdirSync(dir, { recursive: true });
@@ -3009,7 +2906,7 @@ async function downloadRemoteVideoUrl({ sourceUrl, id, provider }) {
 function generatedVideoDir() {
   return path.resolve(
     root,
-    process.env.VIDEO_OUTPUT_DIR || process.env.OPENAI_VIDEO_OUTPUT_DIR || "content-strategy/videos"
+    process.env.VIDEO_OUTPUT_DIR || "content-strategy/videos"
   );
 }
 
@@ -3018,7 +2915,6 @@ function safeFileName(value) {
 }
 
 async function handleIdeaGenerate(payload) {
-  const apiKey = process.env.OPENAI_API_KEY;
   const checkedAt = new Date().toISOString();
   const dailyWindow = currentDailyContentWindow();
   const cache = readDailyContentCache();
@@ -3035,9 +2931,7 @@ async function handleIdeaGenerate(payload) {
 
   let result;
 
-  if (apiKey) {
-    result = await generateIdeaWithOpenAIApi({ apiKey, checkedAt, payload });
-  } else if (hasCodexChatGptAuth()) {
+  if (hasCodexChatGptAuth()) {
     result = await generateIdeaWithCodexCli({ checkedAt, payload });
   } else {
     return {
@@ -3045,7 +2939,7 @@ async function handleIdeaGenerate(payload) {
       configured: false,
       checkedAt,
       message:
-        "No AI credential is configured. Add OPENAI_API_KEY to .env or sign in with Codex so ~/.codex/auth.json is available.",
+        "Codex OAuth is not configured. Sign in with Codex so ~/.codex/auth.json is available.",
     };
   }
 
@@ -3105,38 +2999,8 @@ function withDailyIdeaCacheMetadata(payload, { entry, status, dailyWindow }) {
   };
 }
 
-async function generateIdeaWithOpenAIApi({ apiKey, checkedAt, payload }) {
-  const model = process.env.OPENAI_MODEL || "gpt-5.4-mini";
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      instructions: ideaGenerationInstructions(),
-      input: JSON.stringify(ideaGenerationContext(payload)),
-      max_output_tokens: numberFromEnv("OPENAI_IDEA_MAX_OUTPUT_TOKENS", 900, 300, 4000),
-    }),
-  });
-
-  const data = await parseResponse(response, "OpenAI idea generation");
-  const text = extractOpenAIText(data);
-  const idea = parseGeneratedIdea(text);
-
-  return {
-    ok: true,
-    configured: true,
-    checkedAt,
-    authMode: "openai_api_key",
-    model: data.model || model,
-    idea,
-  };
-}
-
 async function generateIdeaWithCodexCli({ checkedAt, payload }) {
-  const model = process.env.CODEX_IDEA_MODEL || process.env.OPENAI_MODEL || "gpt-5.4-mini";
+  const model = process.env.CODEX_IDEA_MODEL || "gpt-5.4-mini";
   const outputPath = path.join(os.tmpdir(), `jennyscontents-codex-idea-${crypto.randomUUID()}.txt`);
   const schemaPath = path.join(os.tmpdir(), `jennyscontents-codex-idea-schema-${crypto.randomUUID()}.json`);
 
