@@ -130,7 +130,22 @@ async function routeRequest(request, response) {
 
     if (request.method === "POST" && url.pathname === "/login") {
       try {
-        await handleLoginPost(request, response, await readBody(request));
+        const body = await readBody(request);
+        if (isJsonRequest(request)) {
+          const payload = parseJsonPayload(body);
+          if (payload.action === "passkey-login-options") {
+            await handleLoginPasskeyOptions(request, response, payload);
+            return;
+          }
+          if (payload.action === "passkey-login-verify") {
+            await handleLoginPasskeyVerify(request, response, payload);
+            return;
+          }
+          sendJson(response, 400, { ok: false, error: "Unsupported login action." });
+          return;
+        }
+
+        await handleLoginPost(request, response, body);
       } catch (error) {
         renderLogin(response, { error: error.message, next: safeNextPath(url.searchParams.get("next")) });
       }
@@ -152,13 +167,34 @@ async function routeRequest(request, response) {
     }
 
     if (request.method === "GET" && url.pathname === "/account/password") {
-      await handleChangePasswordGet(request, response);
+      await handleChangePasswordGet(request, response, url);
       return;
     }
 
     if (request.method === "POST" && url.pathname === "/account/password") {
       try {
-        await handleChangePasswordPost(request, response, await readBody(request));
+        const body = await readBody(request);
+        if (isJsonRequest(request)) {
+          const payload = parseJsonPayload(body);
+          if (payload.action === "passkey-register-options") {
+            await handlePasskeyRegistrationOptions(request, response);
+            return;
+          }
+          if (payload.action === "passkey-register-verify") {
+            await handlePasskeyRegistrationVerify(request, response, payload);
+            return;
+          }
+          sendJson(response, 400, { ok: false, error: "Unsupported account security action." });
+          return;
+        }
+
+        const params = new URLSearchParams(body);
+        if (params.get("passkeyAction") === "delete") {
+          await handleDeletePasskey(request, response, body);
+          return;
+        }
+
+        await handleChangePasswordPost(request, response, body);
       } catch (error) {
         renderChangePassword(response, { error: error.message });
       }
@@ -566,19 +602,12 @@ async function handleLoginPasskeyVerify(request, response, payload) {
 async function handleAccountSecurityGet(request, response, url) {
   const session = await readSession(request);
   if (!session) {
-    redirect(response, "/login?next=/account/security");
+    redirect(response, "/login?next=/account/password");
     return;
   }
 
-  const passkeys = databasePool && passkeysEnabled
-    ? await listAccountPasskeys(databasePool, session.username)
-    : [];
-  renderAccountSecurity(response, {
-    username: session.username,
-    passkeys,
-    notice: url.searchParams.get("passkeyAdded") ? "Passkey added." : "",
-    error: url.searchParams.get("passkeyError") ? "Passkey could not be updated." : "",
-  });
+  const query = url.search || "";
+  redirect(response, `/account/password${query}`);
 }
 
 async function handlePasskeyRegistrationOptions(request, response) {
@@ -665,7 +694,7 @@ async function handlePasskeyRegistrationVerify(request, response, payload) {
   });
 
   clearPasskeyCookie(response);
-  sendJson(response, 200, { ok: true, redirectTo: "/account/security?passkeyAdded=1" });
+  sendJson(response, 200, { ok: true, redirectTo: "/account/password?passkeyAdded=1" });
 }
 
 async function handleDeletePasskey(request, response, body) {
@@ -673,13 +702,13 @@ async function handleDeletePasskey(request, response, body) {
 
   const session = await readSession(request);
   if (!session) {
-    redirect(response, "/login?next=/account/security");
+    redirect(response, "/login?next=/account/password");
     return;
   }
 
   const params = new URLSearchParams(body);
   await deleteAccountPasskey(databasePool, session.username, params.get("credentialId"));
-  redirect(response, "/account/security");
+  redirect(response, "/account/password");
 }
 
 async function handleLauncher(request, response) {
@@ -713,8 +742,7 @@ async function handleLauncher(request, response) {
           </div>
           <div class="session-chip">
             <span>${escapeHtml(session.name || session.username)}</span>
-            <a href="/account/security">Security</a>
-            <a href="/account/password">Password</a>
+            <a href="/account/password">Account security</a>
             <a href="/logout">Sign out</a>
           </div>
         </header>
@@ -1072,14 +1100,22 @@ function renderResetPassword(
   send(response, 200, pageShell({ title: "Set Password", body }));
 }
 
-async function handleChangePasswordGet(request, response) {
+async function handleChangePasswordGet(request, response, url) {
   const session = await readSession(request);
   if (!session) {
     redirect(response, "/login?next=/account/password");
     return;
   }
 
-  renderChangePassword(response, { username: session.username });
+  const passkeys = databasePool && passkeysEnabled
+    ? await listAccountPasskeys(databasePool, session.username)
+    : [];
+  renderChangePassword(response, {
+    username: session.username,
+    passkeys,
+    notice: url.searchParams.get("passkeyAdded") ? "Passkey added." : "",
+    error: url.searchParams.get("passkeyError") ? "Passkey could not be updated." : "",
+  });
 }
 
 async function handleChangePasswordPost(request, response, body) {
@@ -1091,6 +1127,9 @@ async function handleChangePasswordPost(request, response, body) {
     return;
   }
 
+  const passkeys = databasePool && passkeysEnabled
+    ? await listAccountPasskeys(databasePool, session.username)
+    : [];
   const params = new URLSearchParams(body);
   const currentPassword = String(params.get("currentPassword") || "");
   const password = String(params.get("password") || "");
@@ -1100,6 +1139,7 @@ async function handleChangePasswordPost(request, response, body) {
   if (!user || !verifyPassword(currentPassword, user.passwordHash)) {
     renderChangePassword(response, {
       username: session.username,
+      passkeys,
       error: "The current password was not recognized.",
     });
     return;
@@ -1110,6 +1150,7 @@ async function handleChangePasswordPost(request, response, body) {
   } catch (error) {
     renderChangePassword(response, {
       username: session.username,
+      passkeys,
       error: error.message,
     });
     return;
@@ -1118,26 +1159,47 @@ async function handleChangePasswordPost(request, response, body) {
   await updateAccountPassword(databasePool, session.username, hashPassword(password));
   renderChangePassword(response, {
     username: session.username,
+    passkeys,
     notice: "Password updated.",
   });
 }
 
-function renderChangePassword(response, { username = "", error = "", notice = "" } = {}) {
+function renderChangePassword(response, { username = "", passkeys = [], error = "", notice = "" } = {}) {
   const message = error
     ? `<p class="form-message error">${escapeHtml(error)}</p>`
     : notice
       ? `<p class="form-message">${escapeHtml(notice)}</p>`
       : "";
+  const passkeyRows = passkeys.map((passkey) => `<li class="passkey-row">
+    <div>
+      <strong>${escapeHtml(passkey.nickname || "Passkey")}</strong>
+      <span>${escapeHtml(passkeySummary(passkey))}</span>
+    </div>
+    <form method="post" action="/account/password">
+      <input type="hidden" name="passkeyAction" value="delete" />
+      <input type="hidden" name="credentialId" value="${escapeHtml(passkey.credentialId)}" />
+      <button type="submit" class="danger-button">Remove</button>
+    </form>
+  </li>`).join("");
+  const passkeySection = passkeysEnabled
+    ? `<div class="form-divider"></div>
+      <section class="security-list">
+        <h2>Passkeys</h2>
+        <p class="login-copy">Use a passkey after one normal sign-in. OTP remains available as a fallback.</p>
+        <button type="button" data-passkey-register>Add passkey</button>
+        ${passkeyRows ? `<ul>${passkeyRows}</ul>` : `<p class="empty-note">No passkeys are registered yet.</p>`}
+      </section>`
+    : "";
 
   send(
     response,
     200,
     pageShell({
-      title: "Change Password",
+      title: "Account Security",
       body: `<main class="login-shell">
-        <section class="login-card">
+        <section class="login-card security-card">
           <p class="eyebrow">Jenny Apps</p>
-          <h1>Change password</h1>
+          <h1>Account security</h1>
           <p class="login-copy">${escapeHtml(username)}</p>
           ${message}
           <form method="post" action="/account/password">
@@ -1155,9 +1217,10 @@ function renderChangePassword(response, { username = "", error = "", notice = ""
             </label>
             <button type="submit">Update password</button>
           </form>
+          ${passkeySection}
           <p class="form-footnote"><a href="/">Return to apps</a></p>
         </section>
-      </main>`,
+      </main>${passkeysEnabled ? passkeyBrowserScript() : ""}`,
     })
   );
 }
@@ -1173,7 +1236,8 @@ function renderAccountSecurity(response, { username = "", passkeys = [], error =
       <strong>${escapeHtml(passkey.nickname || "Passkey")}</strong>
       <span>${escapeHtml(passkeySummary(passkey))}</span>
     </div>
-    <form method="post" action="/account/passkeys/delete">
+    <form method="post" action="/account/password">
+      <input type="hidden" name="passkeyAction" value="delete" />
       <input type="hidden" name="credentialId" value="${escapeHtml(passkey.credentialId)}" />
       <button type="submit" class="danger-button">Remove</button>
     </form>
@@ -1310,12 +1374,15 @@ function passkeyBrowserScript({ autostart = false } = {}) {
         }
         button.disabled = true;
         button.textContent = "Opening passkey...";
-        const start = await postJson("/account/passkeys/register/options", {});
+        const start = await postJson("/account/password", {
+          action: "passkey-register-options",
+        });
         const credential = await navigator.credentials.create(creationOptionsFromJson(start.options));
-        const done = await postJson("/account/passkeys/register/verify", {
+        const done = await postJson("/account/password", {
+          action: "passkey-register-verify",
           response: registrationResponseToJson(credential),
         });
-        window.location.href = done.redirectTo || "/account/security";
+        window.location.href = done.redirectTo || "/account/password";
       }
 
       async function loginWithPasskey(form) {
@@ -1329,12 +1396,14 @@ function passkeyBrowserScript({ autostart = false } = {}) {
         }
         const usernameInput = form.querySelector("[name='passkeyUsername']");
         const nextInput = form.querySelector("[name='next']");
-        const start = await postJson("/login/passkey/options", {
+        const start = await postJson("/login", {
+          action: "passkey-login-options",
           username: usernameInput ? usernameInput.value : "",
           next: nextInput ? nextInput.value : "/",
         });
         const credential = await navigator.credentials.get(requestOptionsFromJson(start.options));
-        const done = await postJson("/login/passkey/verify", {
+        const done = await postJson("/login", {
+          action: "passkey-login-verify",
           response: authenticationResponseToJson(credential),
         });
         window.location.href = done.redirectTo || "/";
@@ -2196,8 +2265,16 @@ async function readBody(request) {
 
 async function readJsonBody(request) {
   const body = await readBody(request);
+  return parseJsonPayload(body);
+}
+
+function parseJsonPayload(body) {
   if (!body.trim()) return {};
   return JSON.parse(body);
+}
+
+function isJsonRequest(request) {
+  return String(request.headers["content-type"] || "").toLowerCase().includes("application/json");
 }
 
 function redirect(response, location) {
