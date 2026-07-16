@@ -287,16 +287,6 @@ async function handleLoginGet(request, response, url) {
       return;
     }
 
-    if (user && passkeysEnabled && user.passkeyEnabled) {
-      setMfaCookie(response, mfaState);
-      renderPasskeyChallenge(response, {
-        username: user.username,
-        next: mfaState.next || next,
-        totpEnabled: Boolean(user.totpEnabled && user.totpSecret),
-      });
-      return;
-    }
-
     if (user && user.totpEnabled && user.totpSecret) {
       setMfaCookie(response, mfaState);
       renderTotpChallenge(response, {
@@ -321,6 +311,12 @@ async function handleLoginPost(request, response, body) {
     return;
   }
 
+  const loginStage = String(params.get("loginStage") || "identify");
+  if (loginStage !== "password") {
+    await handleLoginIdentifyPost(request, response, params);
+    return;
+  }
+
   const username = normalizeUsername(params.get("username"));
   const password = params.get("password") || "";
   const next = safeNextPath(params.get("next"));
@@ -328,7 +324,7 @@ async function handleLoginPost(request, response, body) {
   const attempt = checkLoginRate(key);
 
   if (!attempt.allowed) {
-    renderLogin(response, {
+    renderPasswordLogin(response, {
       username,
       next,
       error: `Too many attempts. Try again in ${Math.ceil(attempt.retryAfterMs / 1000)} seconds.`,
@@ -339,7 +335,7 @@ async function handleLoginPost(request, response, body) {
   const user = await findConfiguredUser(username);
   if (!user || !verifyPassword(password, user.passwordHash)) {
     await recordLogin(request, { username, success: false });
-    renderLogin(response, {
+    renderPasswordLogin(response, {
       username,
       next,
       error: "The username or password was not recognized.",
@@ -349,19 +345,9 @@ async function handleLoginPost(request, response, body) {
 
   loginAttempts.delete(key);
 
-  if (passkeysEnabled && user.passkeyEnabled) {
-    setMfaCookie(response, { username: user.username, next });
-    renderPasskeyChallenge(response, {
-      username: user.username,
-      next,
-      totpEnabled: Boolean(user.totpEnabled && user.totpSecret),
-    });
-    return;
-  }
-
   if (requireTotp) {
     if (!databasePool) {
-      renderLogin(response, {
+      renderPasswordLogin(response, {
         username,
         next,
         error: "Authenticator app setup requires database-backed app accounts.",
@@ -388,6 +374,49 @@ async function handleLoginPost(request, response, body) {
     apps: user.apps || [],
   });
   renderLoginComplete(response, { next });
+}
+
+async function handleLoginIdentifyPost(request, response, params) {
+  const username = normalizeUsername(params.get("username"));
+  const next = safeNextPath(params.get("next"));
+  if (!username) {
+    renderLogin(response, {
+      next,
+      error: "Enter the account email first.",
+    });
+    return;
+  }
+
+  const key = `identify:${clientIp(request)}:${username}`;
+  const attempt = checkLoginRate(key);
+  if (!attempt.allowed) {
+    renderLogin(response, {
+      username,
+      next,
+      error: `Too many attempts. Try again in ${Math.ceil(attempt.retryAfterMs / 1000)} seconds.`,
+    });
+    return;
+  }
+
+  const user = await findConfiguredUser(username);
+  const passkeys = user && databasePool && passkeysEnabled
+    ? await listAccountPasskeys(databasePool, user.username)
+    : [];
+
+  if (user && passkeys.length > 0) {
+    loginAttempts.delete(key);
+    renderPasskeyChoice(response, {
+      username: user.username,
+      next,
+    });
+    return;
+  }
+
+  renderPasswordLogin(response, {
+    username,
+    next,
+    notice: "Enter the password, then verify with the authenticator code.",
+  });
 }
 
 async function handleMfaPost(request, response, params, mfaStage) {
@@ -768,33 +797,94 @@ function renderLogin(response, { username = "", next = "/", error = "", notice =
         <section class="login-card">
           <p class="eyebrow">Jenny Apps</p>
           <h1>Sign in</h1>
-          <p class="login-copy">Use password and authenticator verification, or sign in with a passkey after adding one in Account security.</p>
+          <p class="login-copy">Enter the account email first. If a passkey is registered, Jenny can use it next; otherwise the app will ask for password and authenticator code.</p>
           ${message}
           <form method="post" action="/login">
-            <input type="hidden" name="next" value="${escapeHtml(safeNextPath(next))}" />
-            <label>
-              Username
-              <input name="username" autocomplete="username webauthn" value="${escapeHtml(username)}" autofocus />
-            </label>
-            <label>
-              Password
-              <input name="password" type="password" autocomplete="current-password" />
-            </label>
-            <button type="submit">Sign in</button>
-          </form>
-          ${passkeysEnabled ? `<div class="form-divider"><span>or</span></div>
-          <form data-passkey-login-form>
+            <input type="hidden" name="loginStage" value="identify" />
             <input type="hidden" name="next" value="${escapeHtml(safeNextPath(next))}" />
             <label>
               Account email
-              <input name="passkeyUsername" autocomplete="username webauthn" value="${escapeHtml(username)}" />
+              <input name="username" autocomplete="username webauthn" value="${escapeHtml(username)}" autofocus />
             </label>
-            <button type="submit" class="secondary-button">Sign in with passkey</button>
-            <p class="form-footnote">First time using passkeys? Sign in normally, then open Account security to add one.</p>
-          </form>` : ""}
+            <button type="submit">Continue</button>
+          </form>
           <p class="form-footnote"><a href="/reset-password">Set or reset password</a></p>
         </section>
-      </main>${passkeysEnabled ? passkeyBrowserScript() : ""}`,
+      </main>`,
+    })
+  );
+}
+
+function renderPasswordLogin(response, { username = "", next = "/", error = "", notice = "" } = {}) {
+  const message = error
+    ? `<p class="form-message error">${escapeHtml(error)}</p>`
+    : notice
+      ? `<p class="form-message">${escapeHtml(notice)}</p>`
+      : "";
+
+  send(
+    response,
+    200,
+    pageShell({
+      title: "Jenny Apps Login",
+      body: `<main class="login-shell">
+        <section class="login-card">
+          <p class="eyebrow">Jenny Apps</p>
+          <h1>Enter password</h1>
+          <p class="login-copy">${escapeHtml(username)}</p>
+          ${message}
+          <form method="post" action="/login">
+            <input type="hidden" name="loginStage" value="password" />
+            <input type="hidden" name="next" value="${escapeHtml(safeNextPath(next))}" />
+            <input type="hidden" name="username" value="${escapeHtml(username)}" />
+            <label>
+              Password
+              <input name="password" type="password" autocomplete="current-password" autofocus />
+            </label>
+            <button type="submit">Continue</button>
+          </form>
+          <p class="form-footnote"><a href="/login?next=${encodeURIComponent(safeNextPath(next))}">Use a different account</a> · <a href="/reset-password">Set or reset password</a></p>
+        </section>
+      </main>`,
+    })
+  );
+}
+
+function renderPasskeyChoice(response, { username = "", next = "/", error = "" } = {}) {
+  const message = error ? `<p class="form-message error">${escapeHtml(error)}</p>` : "";
+
+  send(
+    response,
+    200,
+    pageShell({
+      title: "Use Passkey",
+      body: `<main class="login-shell">
+        <section class="login-card security-card">
+          <p class="eyebrow">Jenny Apps</p>
+          <h1>Use your passkey</h1>
+          <p class="login-copy">${escapeHtml(username)} has a passkey registered. Use it now, or use password and authenticator code instead.</p>
+          ${message}
+          <form data-passkey-login-form>
+            <input type="hidden" name="next" value="${escapeHtml(safeNextPath(next))}" />
+            <input type="hidden" name="passkeyUsername" value="${escapeHtml(username)}" />
+            <button type="submit" data-autostart-passkey>Sign in with passkey</button>
+          </form>
+          <details class="fallback-panel">
+            <summary>Use password instead</summary>
+            <form method="post" action="/login">
+              <input type="hidden" name="loginStage" value="password" />
+              <input type="hidden" name="next" value="${escapeHtml(safeNextPath(next))}" />
+              <input type="hidden" name="username" value="${escapeHtml(username)}" />
+              <label>
+                Password
+                <input name="password" type="password" autocomplete="current-password" />
+              </label>
+              <button type="submit" class="secondary-button">Continue with password</button>
+            </form>
+          </details>
+          <p class="form-footnote"><a href="/login?next=${encodeURIComponent(safeNextPath(next))}">Use a different account</a></p>
+        </section>
+      </main>${passkeyBrowserScript({ autostart: true })}`,
     })
   );
 }
