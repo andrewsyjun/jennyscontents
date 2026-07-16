@@ -509,7 +509,7 @@ async function handleLoginPasskeyOptions(request, response, payload) {
   if (!user || passkeys.length === 0) {
     sendJson(response, 404, {
       ok: false,
-      error: "Passkey sign-in is not available for that account yet.",
+      error: "No passkey is registered for that account yet. Sign in with password and authenticator first, then open Account security to add a passkey.",
     });
     return;
   }
@@ -768,7 +768,7 @@ function renderLogin(response, { username = "", next = "/", error = "", notice =
         <section class="login-card">
           <p class="eyebrow">Jenny Apps</p>
           <h1>Sign in</h1>
-          <p class="login-copy">Use this workspace for internal tools like content planning, client operations, and financial review. Password and authenticator verification are required.</p>
+          <p class="login-copy">Use password and authenticator verification, or sign in with a passkey after adding one in Account security.</p>
           ${message}
           <form method="post" action="/login">
             <input type="hidden" name="next" value="${escapeHtml(safeNextPath(next))}" />
@@ -790,6 +790,7 @@ function renderLogin(response, { username = "", next = "/", error = "", notice =
               <input name="passkeyUsername" autocomplete="username webauthn" value="${escapeHtml(username)}" />
             </label>
             <button type="submit" class="secondary-button">Sign in with passkey</button>
+            <p class="form-footnote">First time using passkeys? Sign in normally, then open Account security to add one.</p>
           </form>` : ""}
           <p class="form-footnote"><a href="/reset-password">Set or reset password</a></p>
         </section>
