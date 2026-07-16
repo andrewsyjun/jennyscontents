@@ -129,9 +129,10 @@ async function routeRequest(request, response) {
     }
 
     if (request.method === "POST" && url.pathname === "/login") {
+      const jsonRequest = isJsonRequest(request);
       try {
         const body = await readBody(request);
-        if (isJsonRequest(request)) {
+        if (jsonRequest) {
           const payload = parseJsonPayload(body);
           if (payload.action === "passkey-login-options") {
             await handleLoginPasskeyOptions(request, response, payload);
@@ -147,6 +148,10 @@ async function routeRequest(request, response) {
 
         await handleLoginPost(request, response, body);
       } catch (error) {
+        if (jsonRequest) {
+          sendJson(response, 400, { ok: false, error: error.message || "Passkey request failed." });
+          return;
+        }
         renderLogin(response, { error: error.message, next: safeNextPath(url.searchParams.get("next")) });
       }
       return;
@@ -172,9 +177,10 @@ async function routeRequest(request, response) {
     }
 
     if (request.method === "POST" && url.pathname === "/account/password") {
+      const jsonRequest = isJsonRequest(request);
       try {
         const body = await readBody(request);
-        if (isJsonRequest(request)) {
+        if (jsonRequest) {
           const payload = parseJsonPayload(body);
           if (payload.action === "passkey-register-options") {
             await handlePasskeyRegistrationOptions(request, response);
@@ -196,6 +202,10 @@ async function routeRequest(request, response) {
 
         await handleChangePasswordPost(request, response, body);
       } catch (error) {
+        if (jsonRequest) {
+          sendJson(response, 400, { ok: false, error: error.message || "Account security request failed." });
+          return;
+        }
         renderChangePassword(response, { error: error.message });
       }
       return;
@@ -1276,8 +1286,8 @@ function renderChangePassword(response, { username = "", passkeys = [], error = 
     ? `<div class="form-divider"></div>
       <section class="security-list">
         <h2>Passkeys</h2>
-        <p class="login-copy">Use a passkey after one normal sign-in. OTP remains available as a fallback.</p>
-        <button type="button" data-passkey-register>Add passkey</button>
+        <p class="login-copy">You can register more than one passkey, but each one should be a different device or provider. A synced iCloud, Google, or 1Password passkey usually only needs to be added once.</p>
+        <button type="button" data-passkey-register>${passkeyRows ? "Add another passkey" : "Add passkey"}</button>
         ${passkeyRows ? `<ul>${passkeyRows}</ul>` : `<p class="empty-note">No passkeys are registered yet.</p>`}
       </section>`
     : "";
@@ -1360,7 +1370,24 @@ function renderAccountSecurity(response, { username = "", passkeys = [], error =
 function passkeyBrowserScript({ autostart = false } = {}) {
   return `<script>
     (() => {
-      function showPasskeyError(message) {
+      function friendlyPasskeyError(error) {
+        const message = typeof error === "string" ? error : (error && error.message) || "";
+        const lower = message.toLowerCase();
+        if (
+          lower.includes("already registered") ||
+          lower.includes("invalidstate") ||
+          lower.includes("excludecredential") ||
+          lower.includes("excluded credential")
+        ) {
+          return "That passkey or synced passkey provider is already registered for this account. Use a different device/provider, or remove the existing passkey first.";
+        }
+        if (lower.includes("notallowed") || lower.includes("timed out") || lower.includes("cancel")) {
+          return "The passkey prompt was canceled or timed out.";
+        }
+        return message || "Passkey verification failed.";
+      }
+
+      function showPasskeyError(error) {
         let node = document.querySelector("[data-passkey-error]");
         if (!node) {
           node = document.createElement("p");
@@ -1370,7 +1397,7 @@ function passkeyBrowserScript({ autostart = false } = {}) {
           const anchor = card && (card.querySelector("form") || card.querySelector("button"));
           if (card && anchor) card.insertBefore(node, anchor);
         }
-        node.textContent = message || "Passkey verification failed.";
+        node.textContent = friendlyPasskeyError(error);
       }
 
       function base64urlToBuffer(value) {
@@ -1504,7 +1531,7 @@ function passkeyBrowserScript({ autostart = false } = {}) {
         form.addEventListener("submit", (event) => {
           event.preventDefault();
           loginWithPasskey(form).catch((error) => {
-            showPasskeyError(error.message);
+            showPasskeyError(error);
             const button = form.querySelector("button[type='submit']");
             if (button) {
               button.disabled = false;
@@ -1518,11 +1545,12 @@ function passkeyBrowserScript({ autostart = false } = {}) {
       if (registerButton) {
         registerButton.addEventListener("click", () => {
           registerPasskey(registerButton).catch((error) => {
-            showPasskeyError(error.message);
+            showPasskeyError(error);
             registerButton.disabled = false;
-            registerButton.textContent = "Add passkey";
+            registerButton.textContent = registerButton.dataset.originalLabel || "Add passkey";
           });
         });
+        registerButton.dataset.originalLabel = registerButton.textContent || "Add passkey";
       }
 
       ${autostart ? `setTimeout(() => {
