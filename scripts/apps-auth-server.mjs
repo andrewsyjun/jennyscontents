@@ -6,19 +6,30 @@ import { fileURLToPath } from "node:url";
 import nodemailer from "nodemailer";
 import QRCode from "qrcode";
 import {
+  generateAuthenticationOptions,
+  generateRegistrationOptions,
+  verifyAuthenticationResponse,
+  verifyRegistrationResponse,
+} from "@simplewebauthn/server";
+import {
   createPasswordResetToken,
+  createAccountPasskey,
   consumePasswordResetToken,
   countAccounts,
   createPoolFromEnv,
+  deleteAccountPasskey,
   ensureAppsAuthSchema,
+  findAccountPasskeyByCredentialId,
   findAccountByUsername,
   findPasswordResetToken,
   hashPassword,
+  listAccountPasskeys,
   loadEnv,
   normalizeUsername,
   recordLoginEvent,
   setAccountTotpSecret,
   timingSafeEqual,
+  updateAccountPasskeyCounter,
   updateAccountPassword,
   verifyPassword,
 } from "./apps-auth-db.mjs";
@@ -32,9 +43,12 @@ const host = process.env.APPS_AUTH_HOST || "127.0.0.1";
 const port = numberFromEnv("APPS_AUTH_PORT", 4180, 1024, 65535);
 const cookieName = process.env.APPS_AUTH_COOKIE_NAME || "jr_apps_session";
 const mfaCookieName = `${cookieName}_mfa`;
+const passkeyCookieName = `${cookieName}_passkey`;
 const sessionSeconds = numberFromEnv("APPS_AUTH_SESSION_SECONDS", 12 * 60 * 60, 900, 30 * 24 * 60 * 60);
 const mfaSeconds = numberFromEnv("APPS_AUTH_MFA_SECONDS", 10 * 60, 60, 60 * 60);
+const passkeyChallengeSeconds = numberFromEnv("APPS_AUTH_PASSKEY_SECONDS", 5 * 60, 60, 60 * 60);
 const requireTotp = process.env.APPS_AUTH_REQUIRE_TOTP !== "0";
+const passkeysEnabled = process.env.APPS_AUTH_PASSKEYS_ENABLED !== "0";
 const authSecret = process.env.APPS_AUTH_SECRET || "";
 const databasePool = createPoolFromEnv();
 const fileUsers = databasePool ? [] : loadUsers();
@@ -104,6 +118,16 @@ async function routeRequest(request, response) {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/login/passkey/options") {
+      await handleLoginPasskeyOptions(request, response, await readJsonBody(request));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/login/passkey/verify") {
+      await handleLoginPasskeyVerify(request, response, await readJsonBody(request));
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/login") {
       try {
         await handleLoginPost(request, response, await readBody(request));
@@ -141,9 +165,30 @@ async function routeRequest(request, response) {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/account/security") {
+      await handleAccountSecurityGet(request, response, url);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/account/passkeys/register/options") {
+      await handlePasskeyRegistrationOptions(request, response);
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/account/passkeys/register/verify") {
+      await handlePasskeyRegistrationVerify(request, response, await readJsonBody(request));
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/account/passkeys/delete") {
+      await handleDeletePasskey(request, response, await readBody(request));
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/logout") {
       clearSessionCookie(response);
       clearMfaCookie(response);
+      clearPasskeyCookie(response);
       redirect(response, "/login?signedOut=1");
       return;
     }
@@ -206,6 +251,16 @@ async function handleLoginGet(request, response, url) {
       return;
     }
 
+    if (user && passkeysEnabled && user.passkeyEnabled) {
+      setMfaCookie(response, mfaState);
+      renderPasskeyChallenge(response, {
+        username: user.username,
+        next: mfaState.next || next,
+        totpEnabled: Boolean(user.totpEnabled && user.totpSecret),
+      });
+      return;
+    }
+
     if (user && user.totpEnabled && user.totpSecret) {
       setMfaCookie(response, mfaState);
       renderTotpChallenge(response, {
@@ -257,6 +312,16 @@ async function handleLoginPost(request, response, body) {
   }
 
   loginAttempts.delete(key);
+
+  if (passkeysEnabled && user.passkeyEnabled) {
+    setMfaCookie(response, { username: user.username, next });
+    renderPasskeyChallenge(response, {
+      username: user.username,
+      next,
+      totpEnabled: Boolean(user.totpEnabled && user.totpSecret),
+    });
+    return;
+  }
 
   if (requireTotp) {
     if (!databasePool) {
@@ -387,6 +452,236 @@ async function handleLoginComplete(request, response, url) {
   renderLoginComplete(response, { next });
 }
 
+async function handleLoginPasskeyOptions(request, response, payload) {
+  ensurePasskeyMode();
+
+  const mfaState = readMfaState(request);
+  const username = normalizeUsername(payload.username || mfaState?.username);
+  const next = safeNextPath(payload.next || mfaState?.next);
+  const key = `passkey-options:${clientIp(request)}:${username || "unknown"}`;
+  const attempt = checkLoginRate(key);
+  if (!attempt.allowed) {
+    sendJson(response, 429, {
+      ok: false,
+      error: `Too many passkey attempts. Try again in ${Math.ceil(attempt.retryAfterMs / 1000)} seconds.`,
+    });
+    return;
+  }
+
+  const user = await findConfiguredUser(username);
+  const passkeys = user ? await listAccountPasskeys(databasePool, user.username) : [];
+  if (!user || passkeys.length === 0) {
+    sendJson(response, 404, {
+      ok: false,
+      error: "Passkey sign-in is not available for that account yet.",
+    });
+    return;
+  }
+
+  const options = await generateAuthenticationOptions({
+    rpID: passkeyRpId(),
+    allowCredentials: passkeys.map((passkey) => ({
+      id: passkey.credentialId,
+      transports: passkey.transports,
+    })),
+    userVerification: "required",
+    timeout: 90_000,
+  });
+
+  setPasskeyCookie(response, {
+    stage: "login",
+    username: user.username,
+    next,
+    challenge: options.challenge,
+  });
+  sendJson(response, 200, { ok: true, options });
+}
+
+async function handleLoginPasskeyVerify(request, response, payload) {
+  ensurePasskeyMode();
+
+  const state = readPasskeyState(request);
+  if (!state || state.stage !== "login" || !state.username || !state.challenge) {
+    sendJson(response, 400, {
+      ok: false,
+      error: "Your passkey verification window expired. Sign in again.",
+    });
+    return;
+  }
+
+  const user = await findConfiguredUser(state.username);
+  const credentialId = String(payload?.response?.id || payload?.response?.rawId || "");
+  const passkey = user
+    ? await findAccountPasskeyByCredentialId(databasePool, user.username, credentialId)
+    : null;
+  if (!user || !passkey) {
+    await recordLogin(request, { username: state.username, success: false });
+    clearPasskeyCookie(response);
+    sendJson(response, 400, {
+      ok: false,
+      error: "That passkey is not registered for this account.",
+    });
+    return;
+  }
+
+  const verification = await verifyAuthenticationResponse({
+    response: payload.response,
+    expectedChallenge: state.challenge,
+    expectedOrigin: passkeyOrigin(),
+    expectedRPID: passkeyRpId(),
+    requireUserVerification: true,
+    credential: {
+      id: passkey.credentialId,
+      publicKey: new Uint8Array(passkey.credentialPublicKey),
+      counter: passkey.counter,
+      transports: passkey.transports,
+    },
+  });
+
+  if (!verification.verified) {
+    await recordLogin(request, { username: user.username, accountId: user.id, success: false });
+    sendJson(response, 400, {
+      ok: false,
+      error: "That passkey could not be verified.",
+    });
+    return;
+  }
+
+  await updateAccountPasskeyCounter(databasePool, passkey.credentialId, verification.authenticationInfo.newCounter, {
+    deviceType: verification.authenticationInfo.credentialDeviceType,
+    backedUp: verification.authenticationInfo.credentialBackedUp,
+  });
+  loginAttempts.delete(`passkey-options:${clientIp(request)}:${user.username}`);
+  await recordLogin(request, { username: user.username, accountId: user.id, success: true });
+  clearPasskeyCookie(response);
+  clearMfaCookie(response);
+  setSessionCookie(response, {
+    username: user.username,
+    name: user.name || user.username,
+    apps: user.apps || [],
+  });
+  sendJson(response, 200, { ok: true, redirectTo: safeNextPath(state.next) });
+}
+
+async function handleAccountSecurityGet(request, response, url) {
+  const session = await readSession(request);
+  if (!session) {
+    redirect(response, "/login?next=/account/security");
+    return;
+  }
+
+  const passkeys = databasePool && passkeysEnabled
+    ? await listAccountPasskeys(databasePool, session.username)
+    : [];
+  renderAccountSecurity(response, {
+    username: session.username,
+    passkeys,
+    notice: url.searchParams.get("passkeyAdded") ? "Passkey added." : "",
+    error: url.searchParams.get("passkeyError") ? "Passkey could not be updated." : "",
+  });
+}
+
+async function handlePasskeyRegistrationOptions(request, response) {
+  ensurePasskeyMode();
+
+  const session = await readSession(request);
+  if (!session) {
+    sendJson(response, 401, { ok: false, error: "Sign in before adding a passkey." });
+    return;
+  }
+
+  const user = await findConfiguredUser(session.username);
+  const passkeys = user ? await listAccountPasskeys(databasePool, user.username) : [];
+  if (!user) {
+    sendJson(response, 401, { ok: false, error: "Account could not be verified." });
+    return;
+  }
+
+  const options = await generateRegistrationOptions({
+    rpName: passkeyRpName(),
+    rpID: passkeyRpId(),
+    userID: passkeyUserId(user),
+    userName: user.username,
+    userDisplayName: user.name || user.username,
+    attestationType: "none",
+    excludeCredentials: passkeys.map((passkey) => ({
+      id: passkey.credentialId,
+      transports: passkey.transports,
+    })),
+    authenticatorSelection: {
+      residentKey: "preferred",
+      userVerification: "required",
+    },
+    timeout: 90_000,
+  });
+
+  setPasskeyCookie(response, {
+    stage: "register",
+    username: user.username,
+    challenge: options.challenge,
+  });
+  sendJson(response, 200, { ok: true, options });
+}
+
+async function handlePasskeyRegistrationVerify(request, response, payload) {
+  ensurePasskeyMode();
+
+  const session = await readSession(request);
+  const state = readPasskeyState(request);
+  if (!session || !state || state.stage !== "register" || state.username !== session.username || !state.challenge) {
+    clearPasskeyCookie(response);
+    sendJson(response, 400, {
+      ok: false,
+      error: "Your passkey setup window expired. Try again.",
+    });
+    return;
+  }
+
+  const verification = await verifyRegistrationResponse({
+    response: payload.response,
+    expectedChallenge: state.challenge,
+    expectedOrigin: passkeyOrigin(),
+    expectedRPID: passkeyRpId(),
+    requireUserVerification: true,
+  });
+
+  if (!verification.verified || !verification.registrationInfo) {
+    sendJson(response, 400, {
+      ok: false,
+      error: "That passkey could not be verified.",
+    });
+    return;
+  }
+
+  const info = verification.registrationInfo;
+  await createAccountPasskey(databasePool, session.username, {
+    credentialId: info.credential.id,
+    credentialPublicKey: Buffer.from(info.credential.publicKey),
+    counter: info.credential.counter,
+    transports: payload.response?.response?.transports || info.credential.transports || [],
+    deviceType: info.credentialDeviceType,
+    backedUp: info.credentialBackedUp,
+    nickname: payload.nickname || passkeyDefaultNickname(info.credentialDeviceType),
+  });
+
+  clearPasskeyCookie(response);
+  sendJson(response, 200, { ok: true, redirectTo: "/account/security?passkeyAdded=1" });
+}
+
+async function handleDeletePasskey(request, response, body) {
+  ensurePasskeyMode();
+
+  const session = await readSession(request);
+  if (!session) {
+    redirect(response, "/login?next=/account/security");
+    return;
+  }
+
+  const params = new URLSearchParams(body);
+  await deleteAccountPasskey(databasePool, session.username, params.get("credentialId"));
+  redirect(response, "/account/security");
+}
+
 async function handleLauncher(request, response) {
   const session = await readSession(request);
   if (!session) {
@@ -418,6 +713,7 @@ async function handleLauncher(request, response) {
           </div>
           <div class="session-chip">
             <span>${escapeHtml(session.name || session.username)}</span>
+            <a href="/account/security">Security</a>
             <a href="/account/password">Password</a>
             <a href="/logout">Sign out</a>
           </div>
@@ -450,7 +746,7 @@ function renderLogin(response, { username = "", next = "/", error = "", notice =
             <input type="hidden" name="next" value="${escapeHtml(safeNextPath(next))}" />
             <label>
               Username
-              <input name="username" autocomplete="username" value="${escapeHtml(username)}" autofocus />
+              <input name="username" autocomplete="username webauthn" value="${escapeHtml(username)}" autofocus />
             </label>
             <label>
               Password
@@ -458,9 +754,18 @@ function renderLogin(response, { username = "", next = "/", error = "", notice =
             </label>
             <button type="submit">Sign in</button>
           </form>
+          ${passkeysEnabled ? `<div class="form-divider"><span>or</span></div>
+          <form data-passkey-login-form>
+            <input type="hidden" name="next" value="${escapeHtml(safeNextPath(next))}" />
+            <label>
+              Account email
+              <input name="passkeyUsername" autocomplete="username webauthn" value="${escapeHtml(username)}" />
+            </label>
+            <button type="submit" class="secondary-button">Sign in with passkey</button>
+          </form>` : ""}
           <p class="form-footnote"><a href="/reset-password">Set or reset password</a></p>
         </section>
-      </main>`,
+      </main>${passkeysEnabled ? passkeyBrowserScript() : ""}`,
     })
   );
 }
@@ -533,6 +838,44 @@ function renderTotpChallenge(response, { username = "", next = "/", error = "" }
           <p class="form-footnote"><a href="/logout">Cancel and sign out</a></p>
         </section>
       </main>`,
+    })
+  );
+}
+
+function renderPasskeyChallenge(response, { username = "", next = "/", error = "", totpEnabled = false } = {}) {
+  const message = error ? `<p class="form-message error">${escapeHtml(error)}</p>` : "";
+
+  send(
+    response,
+    200,
+    pageShell({
+      title: "Verify Passkey",
+      body: `<main class="login-shell">
+        <section class="login-card security-card">
+          <p class="eyebrow">Jenny Apps</p>
+          <h1>Use your passkey</h1>
+          <p class="login-copy">${escapeHtml(username)} can sign in with Face ID, Touch ID, Windows Hello, or a saved security key.</p>
+          ${message}
+          <form data-passkey-login-form>
+            <input type="hidden" name="next" value="${escapeHtml(safeNextPath(next))}" />
+            <input type="hidden" name="passkeyUsername" value="${escapeHtml(username)}" />
+            <button type="submit" data-autostart-passkey>Verify with passkey</button>
+          </form>
+          ${totpEnabled ? `<details class="fallback-panel">
+            <summary>Use authenticator code instead</summary>
+            <form method="post" action="/login">
+              <input type="hidden" name="mfaStage" value="verify" />
+              <input type="hidden" name="next" value="${escapeHtml(safeNextPath(next))}" />
+              <label>
+                6-digit code
+                <input name="totpCode" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9 ]{6,}" />
+              </label>
+              <button type="submit" class="secondary-button">Verify code</button>
+            </form>
+          </details>` : ""}
+          <p class="form-footnote"><a href="/logout">Cancel and sign out</a></p>
+        </section>
+      </main>${passkeyBrowserScript({ autostart: true })}`,
     })
   );
 }
@@ -819,6 +1162,217 @@ function renderChangePassword(response, { username = "", error = "", notice = ""
   );
 }
 
+function renderAccountSecurity(response, { username = "", passkeys = [], error = "", notice = "" } = {}) {
+  const message = error
+    ? `<p class="form-message error">${escapeHtml(error)}</p>`
+    : notice
+      ? `<p class="form-message">${escapeHtml(notice)}</p>`
+      : "";
+  const rows = passkeys.map((passkey) => `<li class="passkey-row">
+    <div>
+      <strong>${escapeHtml(passkey.nickname || "Passkey")}</strong>
+      <span>${escapeHtml(passkeySummary(passkey))}</span>
+    </div>
+    <form method="post" action="/account/passkeys/delete">
+      <input type="hidden" name="credentialId" value="${escapeHtml(passkey.credentialId)}" />
+      <button type="submit" class="danger-button">Remove</button>
+    </form>
+  </li>`).join("");
+
+  send(
+    response,
+    200,
+    pageShell({
+      title: "Account Security",
+      body: `<main class="login-shell">
+        <section class="login-card security-card">
+          <p class="eyebrow">Jenny Apps</p>
+          <h1>Account security</h1>
+          <p class="login-copy">${escapeHtml(username)} can use passkeys for faster sign-in. Keep at least two passkeys before turning off authenticator fallback.</p>
+          ${message}
+          <button type="button" data-passkey-register>Add passkey</button>
+          <section class="security-list">
+            <h2>Registered passkeys</h2>
+            ${rows ? `<ul>${rows}</ul>` : `<p class="empty-note">No passkeys are registered yet.</p>`}
+          </section>
+          <p class="form-footnote"><a href="/account/password">Change password</a> · <a href="/">Return to apps</a></p>
+        </section>
+      </main>${passkeyBrowserScript()}`,
+    })
+  );
+}
+
+function passkeyBrowserScript({ autostart = false } = {}) {
+  return `<script>
+    (() => {
+      function showPasskeyError(message) {
+        let node = document.querySelector("[data-passkey-error]");
+        if (!node) {
+          node = document.createElement("p");
+          node.className = "form-message error";
+          node.setAttribute("data-passkey-error", "1");
+          const card = document.querySelector(".login-card");
+          const anchor = card && (card.querySelector("form") || card.querySelector("button"));
+          if (card && anchor) card.insertBefore(node, anchor);
+        }
+        node.textContent = message || "Passkey verification failed.";
+      }
+
+      function base64urlToBuffer(value) {
+        const base64 = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+        const padded = base64.padEnd(base64.length + ((4 - base64.length % 4) % 4), "=");
+        const binary = atob(padded);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+        return bytes.buffer;
+      }
+
+      function bufferToBase64url(buffer) {
+        const bytes = new Uint8Array(buffer);
+        let binary = "";
+        for (const byte of bytes) binary += String.fromCharCode(byte);
+        return btoa(binary).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/g, "");
+      }
+
+      function creationOptionsFromJson(options) {
+        return {
+          publicKey: {
+            ...options,
+            challenge: base64urlToBuffer(options.challenge),
+            user: { ...options.user, id: base64urlToBuffer(options.user.id) },
+            excludeCredentials: (options.excludeCredentials || []).map((credential) => ({
+              ...credential,
+              id: base64urlToBuffer(credential.id),
+            })),
+          },
+        };
+      }
+
+      function requestOptionsFromJson(options) {
+        return {
+          publicKey: {
+            ...options,
+            challenge: base64urlToBuffer(options.challenge),
+            allowCredentials: (options.allowCredentials || []).map((credential) => ({
+              ...credential,
+              id: base64urlToBuffer(credential.id),
+            })),
+          },
+        };
+      }
+
+      function registrationResponseToJson(credential) {
+        return {
+          id: credential.id,
+          rawId: bufferToBase64url(credential.rawId),
+          type: credential.type,
+          authenticatorAttachment: credential.authenticatorAttachment,
+          response: {
+            clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+            attestationObject: bufferToBase64url(credential.response.attestationObject),
+            transports: typeof credential.response.getTransports === "function" ? credential.response.getTransports() : [],
+          },
+          clientExtensionResults: credential.getClientExtensionResults(),
+        };
+      }
+
+      function authenticationResponseToJson(credential) {
+        return {
+          id: credential.id,
+          rawId: bufferToBase64url(credential.rawId),
+          type: credential.type,
+          authenticatorAttachment: credential.authenticatorAttachment,
+          response: {
+            clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+            authenticatorData: bufferToBase64url(credential.response.authenticatorData),
+            signature: bufferToBase64url(credential.response.signature),
+            userHandle: credential.response.userHandle ? bufferToBase64url(credential.response.userHandle) : undefined,
+          },
+          clientExtensionResults: credential.getClientExtensionResults(),
+        };
+      }
+
+      async function postJson(url, payload) {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify(payload || {}),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.ok === false) throw new Error(data.error || "Passkey request failed.");
+        return data;
+      }
+
+      async function registerPasskey(button) {
+        if (!window.PublicKeyCredential || !navigator.credentials) {
+          throw new Error("This browser does not support passkeys.");
+        }
+        button.disabled = true;
+        button.textContent = "Opening passkey...";
+        const start = await postJson("/account/passkeys/register/options", {});
+        const credential = await navigator.credentials.create(creationOptionsFromJson(start.options));
+        const done = await postJson("/account/passkeys/register/verify", {
+          response: registrationResponseToJson(credential),
+        });
+        window.location.href = done.redirectTo || "/account/security";
+      }
+
+      async function loginWithPasskey(form) {
+        if (!window.PublicKeyCredential || !navigator.credentials) {
+          throw new Error("This browser does not support passkeys.");
+        }
+        const button = form.querySelector("button[type='submit']");
+        if (button) {
+          button.disabled = true;
+          button.textContent = "Opening passkey...";
+        }
+        const usernameInput = form.querySelector("[name='passkeyUsername']");
+        const nextInput = form.querySelector("[name='next']");
+        const start = await postJson("/login/passkey/options", {
+          username: usernameInput ? usernameInput.value : "",
+          next: nextInput ? nextInput.value : "/",
+        });
+        const credential = await navigator.credentials.get(requestOptionsFromJson(start.options));
+        const done = await postJson("/login/passkey/verify", {
+          response: authenticationResponseToJson(credential),
+        });
+        window.location.href = done.redirectTo || "/";
+      }
+
+      document.querySelectorAll("[data-passkey-login-form]").forEach((form) => {
+        form.addEventListener("submit", (event) => {
+          event.preventDefault();
+          loginWithPasskey(form).catch((error) => {
+            showPasskeyError(error.message);
+            const button = form.querySelector("button[type='submit']");
+            if (button) {
+              button.disabled = false;
+              button.textContent = "Sign in with passkey";
+            }
+          });
+        });
+      });
+
+      const registerButton = document.querySelector("[data-passkey-register]");
+      if (registerButton) {
+        registerButton.addEventListener("click", () => {
+          registerPasskey(registerButton).catch((error) => {
+            showPasskeyError(error.message);
+            registerButton.disabled = false;
+            registerButton.textContent = "Add passkey";
+          });
+        });
+      }
+
+      ${autostart ? `setTimeout(() => {
+        const button = document.querySelector("[data-autostart-passkey]");
+        if (button) button.click();
+      }, 250);` : ""}
+    })();
+  </script>`;
+}
+
 function pageShell({ title, body }) {
   return `<!doctype html>
 <html lang="en">
@@ -917,6 +1471,36 @@ function pageShell({ title, body }) {
         cursor: wait;
         opacity: 0.72;
       }
+      .secondary-button {
+        border: 1px solid var(--line);
+        background: white;
+        color: var(--accent);
+      }
+      .secondary-button:hover { background: #f9f6ef; }
+      .danger-button {
+        border: 1px solid #d8aaa0;
+        background: #fff4f1;
+        color: #8b2f24;
+      }
+      .danger-button:hover { background: #ffe8e1; }
+      .form-divider {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        gap: 10px;
+        margin: 18px 0;
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 850;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .form-divider::before,
+      .form-divider::after {
+        content: "";
+        height: 1px;
+        background: var(--line);
+      }
       .form-message {
         margin: 0 0 16px;
         border: 1px solid var(--line);
@@ -983,6 +1567,51 @@ function pageShell({ title, body }) {
         font-weight: 800;
         text-decoration: none;
       }
+      .fallback-panel,
+      .security-list {
+        margin-top: 18px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px;
+        background: #f9f6ef;
+      }
+      .fallback-panel summary {
+        cursor: pointer;
+        color: var(--accent);
+        font-weight: 850;
+      }
+      .fallback-panel form { margin-top: 14px; }
+      .security-list h2 {
+        margin: 0 0 12px;
+        font-size: 1rem;
+      }
+      .security-list ul {
+        display: grid;
+        gap: 10px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .passkey-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+        background: white;
+      }
+      .passkey-row div {
+        display: grid;
+        gap: 4px;
+      }
+      .passkey-row span,
+      .empty-note {
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      .passkey-row form { display: block; }
       .launcher {
         width: min(1120px, calc(100% - 32px));
         margin: 0 auto;
@@ -1118,6 +1747,39 @@ function setMfaCookie(response, state) {
 
 function clearMfaCookie(response) {
   clearCookieVariants(response, mfaCookieName);
+}
+
+function readPasskeyState(request) {
+  const payload = readSignedCookiePayload(request, passkeyCookieName);
+  if (!payload) return null;
+
+  return {
+    stage: String(payload.stage || ""),
+    username: normalizeUsername(payload.username),
+    next: safeNextPath(payload.next),
+    challenge: String(payload.challenge || "").trim(),
+  };
+}
+
+function setPasskeyCookie(response, state) {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = Buffer.from(
+    JSON.stringify({
+      stage: String(state.stage || ""),
+      username: normalizeUsername(state.username),
+      next: safeNextPath(state.next),
+      challenge: String(state.challenge || "").trim(),
+      iat: now,
+      exp: now + passkeyChallengeSeconds,
+      nonce: crypto.randomBytes(12).toString("base64url"),
+    })
+  ).toString("base64url");
+  const cookie = `${passkeyCookieName}=${payload}.${sign(payload)}; Path=/; Max-Age=${passkeyChallengeSeconds}; HttpOnly; Secure; SameSite=Lax`;
+  appendSetCookie(response, cookie);
+}
+
+function clearPasskeyCookie(response) {
+  clearCookieVariants(response, passkeyCookieName);
 }
 
 function readSignedCookiePayload(request, name) {
@@ -1413,6 +2075,52 @@ function publicBaseUrl() {
   return String(process.env.APPS_AUTH_PUBLIC_URL || "https://apps.junresidential.com").replace(/\/+$/, "");
 }
 
+function passkeyOrigin() {
+  return String(process.env.APPS_AUTH_PASSKEY_ORIGIN || publicBaseUrl()).replace(/\/+$/, "");
+}
+
+function passkeyRpId() {
+  if (process.env.APPS_AUTH_PASSKEY_RP_ID) return process.env.APPS_AUTH_PASSKEY_RP_ID;
+  try {
+    return new URL(passkeyOrigin()).hostname;
+  } catch {
+    return "apps.junresidential.com";
+  }
+}
+
+function passkeyRpName() {
+  return process.env.APPS_AUTH_PASSKEY_RP_NAME || "Jenny Apps";
+}
+
+function ensurePasskeyMode() {
+  if (!passkeysEnabled) throw new Error("Passkey sign-in is not enabled.");
+  if (!databasePool) throw new Error("Passkeys require database-backed app accounts.");
+}
+
+function passkeyUserId(user) {
+  return crypto
+    .createHash("sha256")
+    .update(`jenny-apps:${user.id}:${user.username}`)
+    .digest();
+}
+
+function passkeyDefaultNickname(deviceType = "") {
+  return deviceType === "multiDevice" ? "Synced passkey" : "Device passkey";
+}
+
+function passkeySummary(passkey) {
+  const parts = [];
+  if (passkey.deviceType === "multiDevice") parts.push("Synced");
+  if (passkey.deviceType === "singleDevice") parts.push("This device");
+  if (passkey.backedUp) parts.push("backed up");
+  if (passkey.lastUsedAt) {
+    parts.push(`last used ${new Date(passkey.lastUsedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`);
+  } else if (passkey.createdAt) {
+    parts.push(`added ${new Date(passkey.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`);
+  }
+  return parts.join(" · ") || "Ready for passkey sign-in";
+}
+
 function checkLoginRate(key) {
   const now = Date.now();
   const windowMs = 10 * 60 * 1000;
@@ -1484,6 +2192,12 @@ async function readBody(request) {
     chunks.push(chunk);
   }
   return Buffer.concat(chunks).toString("utf8");
+}
+
+async function readJsonBody(request) {
+  const body = await readBody(request);
+  if (!body.trim()) return {};
+  return JSON.parse(body);
 }
 
 function redirect(response, location) {

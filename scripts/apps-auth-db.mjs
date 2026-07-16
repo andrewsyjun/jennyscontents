@@ -65,6 +65,23 @@ export async function ensureAppsAuthSchema(pool) {
 
     create index if not exists app_password_reset_tokens_account_id_created_at_idx
       on app_password_reset_tokens (account_id, created_at desc);
+
+    create table if not exists app_account_passkeys (
+      id bigserial primary key,
+      account_id bigint not null references app_accounts(id) on delete cascade,
+      credential_id text not null unique,
+      credential_public_key bytea not null,
+      counter bigint not null default 0,
+      transports text[] not null default '{}',
+      device_type text,
+      backed_up boolean,
+      nickname text,
+      created_at timestamptz not null default now(),
+      last_used_at timestamptz
+    );
+
+    create index if not exists app_account_passkeys_account_id_created_at_idx
+      on app_account_passkeys (account_id, created_at desc);
   `);
 }
 
@@ -84,13 +101,15 @@ export async function findAccountByUsername(pool, username) {
         a.is_active as "isActive",
         a.totp_secret as "totpSecret",
         a.totp_enabled_at as "totpEnabledAt",
+        count(distinct apk.id)::int as "passkeyCount",
         coalesce(
-          array_agg(aa.app_id order by aa.app_id)
+          array_agg(distinct aa.app_id order by aa.app_id)
             filter (where aa.app_id is not null),
           '{}'
         ) as apps
       from app_accounts a
       left join app_account_apps aa on aa.account_id = a.id
+      left join app_account_passkeys apk on apk.account_id = a.id
       where a.username = $1
       group by a.id;
     `,
@@ -100,6 +119,8 @@ export async function findAccountByUsername(pool, username) {
   const account = result.rows[0];
   if (!account || !account.isActive) return null;
   account.totpEnabled = Boolean(account.totpSecret && account.totpEnabledAt);
+  account.passkeyCount = Number(account.passkeyCount || 0);
+  account.passkeyEnabled = account.passkeyCount > 0;
   return account;
 }
 
@@ -110,21 +131,182 @@ export async function listAccounts(pool) {
       a.name,
       a.is_active as "isActive",
       a.totp_enabled_at as "totpEnabledAt",
+      count(distinct apk.id)::int as "passkeyCount",
       a.created_at as "createdAt",
       a.updated_at as "updatedAt",
       a.last_login_at as "lastLoginAt",
       coalesce(
-        array_agg(aa.app_id order by aa.app_id)
+        array_agg(distinct aa.app_id order by aa.app_id)
           filter (where aa.app_id is not null),
         '{}'
       ) as apps
     from app_accounts a
     left join app_account_apps aa on aa.account_id = a.id
+    left join app_account_passkeys apk on apk.account_id = a.id
     group by a.id
     order by a.username;
   `);
 
   return result.rows;
+}
+
+export async function listAccountPasskeys(pool, username) {
+  const result = await pool.query(
+    `
+      select
+        apk.id,
+        apk.credential_id as "credentialId",
+        apk.counter::text as counter,
+        apk.transports,
+        apk.device_type as "deviceType",
+        apk.backed_up as "backedUp",
+        apk.nickname,
+        apk.created_at as "createdAt",
+        apk.last_used_at as "lastUsedAt"
+      from app_account_passkeys apk
+      join app_accounts a on a.id = apk.account_id
+      where a.username = $1 and a.is_active = true
+      order by apk.created_at desc;
+    `,
+    [normalizeUsername(username)]
+  );
+
+  return result.rows.map(normalizePasskeyRow);
+}
+
+export async function findAccountPasskeyByCredentialId(pool, username, credentialId) {
+  const result = await pool.query(
+    `
+      select
+        apk.id,
+        apk.credential_id as "credentialId",
+        apk.credential_public_key as "credentialPublicKey",
+        apk.counter::text as counter,
+        apk.transports,
+        apk.device_type as "deviceType",
+        apk.backed_up as "backedUp",
+        apk.nickname,
+        apk.created_at as "createdAt",
+        apk.last_used_at as "lastUsedAt",
+        a.id as "accountId",
+        a.username,
+        a.name,
+        a.is_active as "isActive",
+        coalesce(
+          array_agg(distinct aa.app_id order by aa.app_id)
+            filter (where aa.app_id is not null),
+          '{}'
+        ) as apps
+      from app_account_passkeys apk
+      join app_accounts a on a.id = apk.account_id
+      left join app_account_apps aa on aa.account_id = a.id
+      where a.username = $1 and apk.credential_id = $2
+      group by apk.id, a.id;
+    `,
+    [normalizeUsername(username), String(credentialId || "")]
+  );
+
+  const row = result.rows[0];
+  if (!row || !row.isActive) return null;
+  return normalizePasskeyRow(row);
+}
+
+export async function createAccountPasskey(
+  pool,
+  username,
+  { credentialId, credentialPublicKey, counter = 0, transports = [], deviceType = "", backedUp = false, nickname = "" }
+) {
+  const account = await findAccountByUsername(pool, username);
+  if (!account) throw new Error(`active account not found: ${username}`);
+
+  const result = await pool.query(
+    `
+      insert into app_account_passkeys (
+        account_id,
+        credential_id,
+        credential_public_key,
+        counter,
+        transports,
+        device_type,
+        backed_up,
+        nickname
+      )
+      values ($1, $2, $3, $4, $5, $6, $7, $8)
+      on conflict (credential_id) do nothing
+      returning
+        id,
+        credential_id as "credentialId",
+        counter::text as counter,
+        transports,
+        device_type as "deviceType",
+        backed_up as "backedUp",
+        nickname,
+        created_at as "createdAt",
+        last_used_at as "lastUsedAt";
+    `,
+    [
+      account.id,
+      String(credentialId || ""),
+      Buffer.from(credentialPublicKey),
+      Number.isFinite(Number(counter)) ? Number(counter) : 0,
+      Array.isArray(transports) ? transports.map(String) : [],
+      String(deviceType || ""),
+      Boolean(backedUp),
+      String(nickname || "").trim() || null,
+    ]
+  );
+
+  const row = result.rows[0];
+  if (!row) throw new Error("This passkey is already registered.");
+  return normalizePasskeyRow(row);
+}
+
+export async function updateAccountPasskeyCounter(pool, credentialId, counter, { deviceType = "", backedUp } = {}) {
+  const result = await pool.query(
+    `
+      update app_account_passkeys
+      set
+        counter = $2,
+        device_type = coalesce(nullif($3, ''), device_type),
+        backed_up = coalesce($4::boolean, backed_up),
+        last_used_at = now()
+      where credential_id = $1
+      returning
+        id,
+        credential_id as "credentialId",
+        counter::text as counter,
+        transports,
+        device_type as "deviceType",
+        backed_up as "backedUp",
+        nickname,
+        created_at as "createdAt",
+        last_used_at as "lastUsedAt";
+    `,
+    [
+      String(credentialId || ""),
+      Number.isFinite(Number(counter)) ? Number(counter) : 0,
+      String(deviceType || ""),
+      typeof backedUp === "boolean" ? backedUp : null,
+    ]
+  );
+
+  return result.rows[0] ? normalizePasskeyRow(result.rows[0]) : null;
+}
+
+export async function deleteAccountPasskey(pool, username, credentialId) {
+  const result = await pool.query(
+    `
+      delete from app_account_passkeys apk
+      using app_accounts a
+      where apk.account_id = a.id
+        and a.username = $1
+        and apk.credential_id = $2
+      returning apk.credential_id as "credentialId";
+    `,
+    [normalizeUsername(username), String(credentialId || "")]
+  );
+
+  return result.rowCount > 0;
 }
 
 export async function setAccountTotpSecret(pool, username, secret) {
@@ -367,6 +549,15 @@ export function timingSafeEqual(a, b) {
 
 export function normalizeUsername(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function normalizePasskeyRow(row) {
+  return {
+    ...row,
+    counter: Number(row.counter || 0),
+    transports: Array.isArray(row.transports) ? row.transports.filter(Boolean).map(String) : [],
+    credentialPublicKey: row.credentialPublicKey ? Buffer.from(row.credentialPublicKey) : undefined,
+  };
 }
 
 function resetTokenHash(token) {

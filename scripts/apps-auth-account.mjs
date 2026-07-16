@@ -39,6 +39,7 @@ try {
           row.name,
           row.isActive ? "active" : "disabled",
           row.totpEnabledAt ? "2fa" : "no-2fa",
+          row.passkeyCount ? `${row.passkeyCount} passkey${row.passkeyCount === 1 ? "" : "s"}` : "no-passkey",
           Array.isArray(row.apps) ? row.apps.join(",") : "",
           row.lastLoginAt ? new Date(row.lastLoginAt).toISOString() : "never",
         ].join("\t")
